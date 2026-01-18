@@ -1,0 +1,30 @@
+{
+    // 1. 禁用 STM32 插件 (避免冲突)
+    "stm32cube-ide-clangd.enable": false,
+    // CMake 相关配置
+    "cmake.cmakePath": "cube-cmake",
+    "cmake.configureArgs": [ "-DCMAKE_COMMAND=cube-cmake" ],
+    "cmake.preferredGenerators": [
+        "Ninja"
+    ],
+    "stm32cube-ide-clangd.path": "cube",
+    "stm32cube-ide-clangd.arguments": [
+        "starm-clangd",
+        "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gcc.exe",
+        "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-g++.exe"
+    ],
+    // 注意：推荐用正斜杠 /，防止转义错误
+    "clangd.path": "C:/Program Files/LLVM/bin/clangd.exe",
+
+    // --- 下面的参数必须保留！因为新的 Clangd 依然需要去问 GCC 要头文件 ---
+    "clangd.arguments": [
+        "--log=verbose",
+        "--compile-commands-dir=${workspaceFolder}/out/build/CPP",
+        "--background-index",
+        "-j=4",
+        
+        // 这一行依然是必须的，不管是哪个版本的 Clangd
+        // 注意双反斜杠
+        "--query-driver=c:\\Toolchain\\**"
+    ],
+}

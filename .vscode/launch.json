@@ -1,0 +1,83 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        
+        {
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "name": "STM32Cube: STM32 Launch ST-Link GDB Server",
+            "origin": "snippet",
+            "cwd": "${workspaceFolder}",
+            "preBuild": "${command:st-stm32-ide-debug-launch.build}",
+            "runEntry": "main",
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${command:st-stm32-ide-debug-launch.get-projects-binary-from-context1}"
+                }
+            ]
+        },
+        
+        {
+            "name": "Cortex-Debug: ST-LINK GDB Server (Launch)",
+            "type": "cortex-debug",
+            "request": "launch",
+
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/out/build/CPP/ROBOT_CPP.elf",
+
+            "servertype": "stlink",
+            "serverpath": "C:/ST/STM32CubeCLT_1.20.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
+            "gdbPath": "C:/Program Files/Arm/GNU Toolchain mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gdb.exe",
+
+            "interface": "swd",
+            "device": "STM32F407IGH6",
+            "runToEntryPoint": "main",
+
+            
+            "showDevDebugOutput": "raw",
+
+            "liveWatch": { "enabled": true },
+
+            "postRestartCommands": [
+                "monitor reset halt"
+            ]
+        },
+        {
+            "name": "Cortex-Debug: OpenOCD (ST-Link, SWD)",
+            "type": "cortex-debug",
+            "request": "launch",
+
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/out/build/CPP/ROBOT_CPP.elf",
+
+            "servertype": "openocd",
+            "interface": "swd",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32f4x.cfg"
+            ],
+
+            "gdbPath": "C:/Toolchain/arm-none-eabi/bin/arm-none-eabi-gdb.exe",
+            "openOCDPath": "C:/Program Files (x86)/openocd/bin/openocd.exe",
+            "searchDir": [
+                "C:/Program Files (x86)/openocd/openocd/scripts"
+            ],
+
+            "runToEntryPoint": "main",
+            "rtos": "FreeRTOS",
+            "showDevDebugOutput": "raw",
+            "liveWatch": { "enabled": true, "samplesPerSecond": 10 },
+            "postRestartCommands": [
+                "monitor reset halt"
+            ]
+        }
+
+
+
+        
+    ]
+}

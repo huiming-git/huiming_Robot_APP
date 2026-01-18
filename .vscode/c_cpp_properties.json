@@ -1,0 +1,8 @@
+{
+    "configurations": [
+        {
+            "name": "STM32",
+            "compileCommands": "${workspaceFolder}/out/build/CPP/compile_commands.json"
+        }
+    ]
+}

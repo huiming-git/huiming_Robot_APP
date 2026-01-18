@@ -1,0 +1,61 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "default",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
+            "cacheVariables": {}
+        },
+        {
+            "name": "Debug",
+            "inherits": "default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "Release",
+            "inherits": "default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+{
+            "name": "CPP",
+            "displayName": "STM32 - GCC 15.2 (Ninja)",
+            "description": "STM32 Development with C++23 & Ninja",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "Generic",
+                "CMAKE_SYSTEM_PROCESSOR": "arm",
+                "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_STANDARD": "23",
+                "CMAKE_C_COMPILER": "c:/Toolchain/arm-none-eabi/bin/arm-none-eabi-gcc.exe",
+                "CMAKE_CXX_COMPILER": "c:/Toolchain/arm-none-eabi/bin/arm-none-eabi-g++.exe",
+                "CMAKE_MAKE_PROGRAM": "c:/Toolchain/arm-none-eabi/bin/ninja.exe",
+                "CMAKE_ASM_COMPILER": "C:/Toolchain/arm-none-eabi/bin/arm-none-eabi-gcc.exe"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "Debug",
+            "configurePreset": "Debug"
+        },
+        {
+            "name": "Release",
+            "configurePreset": "Release"
+        },
+        { 
+            "name": "CPP_Build",
+            "configurePreset": "CPP" 
+        }
+    ]
+}
