@@ -29,6 +29,8 @@ class ControlLoop {
   const domain::ChassisCommand& last_command() const { return last_cmd_; }
   bool last_command_valid() const { return last_cmd_valid_; }
   uint64_t last_command_ts_us() const { return last_cmd_ts_us_; }
+  const domain::StateEstimate& last_filtered_estimate() const { return last_est_filtered_; }
+  const domain::LqrState& last_lqr_state() const { return lqr_state_; }
 
  private:
   domain::ChassisSensors sensors_{};
@@ -39,6 +41,24 @@ class ControlLoop {
   bool last_cmd_valid_ = false;
   uint64_t last_cmd_ts_us_ = 0;
   uint64_t last_wheels_fb_ts_us_ = 0;
+  domain::StateEstimate last_est_filtered_{};
+  domain::LqrState lqr_state_{};
+  std::size_t dm_bringup_index_ = 0;
+  bool dm_bringup_done_ = false;
+  struct JointDebugState {
+    bool has_home = false;
+    std::array<float, 4> home{};
+    uint64_t start_ts_us = 0;
+  };
+  JointDebugState joint_debug_{};
+
+  struct WheelOdomState {
+    bool valid = false;
+    int32_t ticks = 0;
+    uint16_t last_enc = 0;
+    float vel_mps = 0.0f;
+  };
+  std::array<WheelOdomState, 2> wheel_odom_{};
 
  platform::AppCanPort can_port_{};
  drivers::StaticMotorManager<8> motor_mgr_{};

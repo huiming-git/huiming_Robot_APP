@@ -46,6 +46,7 @@ struct ChassisControllerInput {
   uint32_t dt_us = 0;
   const domain::SensorsSnapshot* sensors = nullptr;
   const domain::StateEstimate* estimate = nullptr;
+  const domain::LqrState* lqr = nullptr;
   const domain::WheelOdomConfig* wheel_odom_cfg = nullptr;
   const domain::WheelControllerConfig* wheel_ctrl_cfg = nullptr;
   const domain::OperatorState* operator_state = nullptr;

@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_bridge.h"
+#include "app_can.h"
 #include "app_params.h"
 #include "can.h"
 #include "usart.h"
@@ -81,6 +82,22 @@ const osThreadAttr_t logicTask_attributes = {
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
 
+osThreadId_t canDebugTaskHandle;
+const osThreadAttr_t canDebugTask_attributes = {
+  .name = "canDebugTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityIdle,
+};
+
+volatile uint8_t g_app_can2_dbg_enable = 1;
+volatile uint16_t g_app_can2_dbg_std_id = 0x04;
+volatile uint16_t g_app_can2_dbg_ids[4] = {1U, 2U, 3U, 4U};
+volatile uint8_t g_app_can2_dbg_dlc = 8;
+volatile uint8_t g_app_can2_dbg_data[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC};
+volatile uint32_t g_app_can2_dbg_period_ms = 100;
+volatile uint32_t g_app_can2_dbg_sent = 0;
+volatile uint32_t g_app_can2_dbg_failed = 0;
+
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -96,6 +113,7 @@ void StartControlTask(void *argument);
 void StartSensorTask(void *argument);
 void StartSbusTask(void *argument);
 void StartLogicTask(void *argument);
+void StartCanDebugTask(void *argument);
 
 /* USER CODE END FunctionPrototypes */
 
@@ -138,6 +156,7 @@ void MX_FREERTOS_Init(void) {
   sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
   sbusTaskHandle = osThreadNew(StartSbusTask, NULL, &sbusTask_attributes);
   logicTaskHandle = osThreadNew(StartLogicTask, NULL, &logicTask_attributes);
+  canDebugTaskHandle = osThreadNew(StartCanDebugTask, NULL, &canDebugTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -185,6 +204,63 @@ void StartControlTask(void *argument)
     }
     last_ts = g_control_last_ts_us;
     RobotApp_ControlTick(g_control_last_ts_us);
+  }
+}
+
+void StartCanDebugTask(void *argument)
+{
+  (void)argument;
+  for (;;)
+  {
+    if (g_app_can2_dbg_enable != 0U)
+    {
+      static const uint8_t enable_data[8] = {0xFF, 0xFF, 0xFF, 0xFF,
+                                             0xFF, 0xFF, 0xFF, 0xFC};
+      static uint8_t idx = 0U;
+
+      uint16_t std_id = 0U;
+      for (uint8_t k = 0; k < 4U; ++k)
+      {
+        const uint8_t probe = (uint8_t)((idx + k) & 0x03U);
+        const uint16_t cand = g_app_can2_dbg_ids[probe];
+        if (cand != 0U)
+        {
+          std_id = cand;
+          idx = (uint8_t)((probe + 1U) & 0x03U);
+          break;
+        }
+      }
+
+      if (std_id != 0U)
+      {
+        g_robotapp_dm_enable_tx_last_std_id = std_id;
+        if (std_id >= 1U && std_id <= 4U)
+        {
+          const uint8_t m = (uint8_t)(std_id - 1U);
+          g_robotapp_dm_enable_tx_attempt[m] += 1U;
+          if (App_Can_Tx(2U, std_id, enable_data, 8U) != 0U)
+          {
+            g_robotapp_dm_enable_tx_started[m] += 1U;
+            g_app_can2_dbg_sent += 1U;
+          }
+          else
+          {
+            g_app_can2_dbg_failed += 1U;
+          }
+        }
+        else
+        {
+          if (App_Can_Tx(2U, std_id, enable_data, 8U) != 0U)
+            g_app_can2_dbg_sent += 1U;
+          else
+            g_app_can2_dbg_failed += 1U;
+        }
+      }
+    }
+
+    uint32_t period_ms = g_app_can2_dbg_period_ms;
+    if (period_ms == 0U) period_ms = 1U;
+    osDelay(period_ms);
   }
 }
 

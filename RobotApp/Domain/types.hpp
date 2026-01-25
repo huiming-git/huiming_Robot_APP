@@ -171,7 +171,7 @@ struct MagCalibration {
 struct WheelOdomConfig {
   float wheel_radius_m = 0.06f;
   float wheel_track_m = 0.30f;
-  float wheel_gear_ratio = 19.2f;
+  float wheel_gear_ratio = 1.0f;
   int8_t rpm_sign_left = 1;
   int8_t rpm_sign_right = 1;
   uint16_t reserved0 = 0;
@@ -199,6 +199,18 @@ struct StateEstimate {
   float gyro_bias_rps[3] = {0.0f, 0.0f, 0.0f};
   float accel_bias_mps2[3] = {0.0f, 0.0f, 0.0f};
 
+  uint64_t ts_us = 0;
+  uint8_t valid = 0;
+  uint8_t reserved0 = 0;
+  uint16_t reserved1 = 0;
+};
+
+// LQR-friendly balancing state (derived from IMU + wheel encoder).
+struct LqrState {
+  float theta_rad = 0.0f;      // body pitch angle (rad)
+  float theta_dot_rps = 0.0f;  // body pitch rate (rad/s)
+  float x_m = 0.0f;            // wheel position along ground (m)
+  float x_dot_mps = 0.0f;      // wheel velocity along ground (m/s)
   uint64_t ts_us = 0;
   uint8_t valid = 0;
   uint8_t reserved0 = 0;
@@ -293,6 +305,7 @@ struct DiagnosticsSnapshot {
   RemoteDiagnostics remote_diag{};
   SensorsSnapshot sensors{};
   StateEstimate estimate{};
+  LqrState lqr{};
 
   ChassisCommand actuator_cmd{};
   uint8_t actuator_cmd_valid = 0;

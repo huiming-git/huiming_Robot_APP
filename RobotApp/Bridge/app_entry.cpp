@@ -292,6 +292,7 @@ App_MagCalibration g_robotapp_mag_calib = {};
 App_SafetyConfig g_robotapp_safety_cfg = {};
 App_WheelOdomConfig g_robotapp_wheel_odom_cfg = {};
 App_WheelControllerConfig g_robotapp_wheel_ctrl_cfg = {};
+volatile int16_t g_robotapp_wheel_cmd_mA[2] = {0, 0};
 }
 
 extern "C" void RobotApp_Init(void)
@@ -340,7 +341,6 @@ extern "C" void RobotApp_ControlTick(uint64_t ts_us)
   const auto motor_fb = robotapp::get_motor_feedback();
   const auto est = robotapp::g_estimator.step(imu_state, &mag_state, &motor_fb, ts_us);
   robotapp::set_estimate(est);
-  g_robotapp_estimate = est;  // debug mirror only
 
   robotapp::g_control_loop.tick(ts_us);
 
@@ -387,16 +387,24 @@ extern "C" void RobotApp_ControlTick(uint64_t ts_us)
   robotapp::set_sys_health(h);
   g_robotapp_sys_health = h;  // debug mirror only
 
+  const auto est_kalman = robotapp::g_control_loop.last_filtered_estimate();
+  g_robotapp_estimate = est_kalman;  // debug mirror only
+
   robotapp::domain::DiagnosticsSnapshot d{};
   d.ts_us = ts_us;
   d.operator_state = robotapp::get_operator_state();
   d.remote = robotapp::get_remote_state();
   d.remote_diag = robotapp::get_remote_diag();
   d.sensors = s;
-  d.estimate = est;
+  d.estimate = est_kalman;
+  d.lqr = robotapp::g_control_loop.last_lqr_state();
   d.actuator_cmd = robotapp::g_control_loop.last_command();
   d.actuator_cmd_valid = robotapp::g_control_loop.last_command_valid() ? 1U : 0U;
   d.actuator_cmd_ts_us = robotapp::g_control_loop.last_command_ts_us();
+  g_robotapp_wheel_cmd_mA[0] =
+      (!d.actuator_cmd.wheels.empty()) ? d.actuator_cmd.wheels[0].current : 0;
+  g_robotapp_wheel_cmd_mA[1] =
+      (d.actuator_cmd.wheels.size() > 1U) ? d.actuator_cmd.wheels[1].current : 0;
   d.safety_cfg = g_robotapp_safety_cfg;
   d.imu_calib = g_robotapp_imu_calib;
   d.mag_calib = g_robotapp_mag_calib;

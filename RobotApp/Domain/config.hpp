@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 namespace robotapp::domain::config {
@@ -37,12 +38,16 @@ inline constexpr bool kStopOnRemoteBadFrameBurst = false;
 inline constexpr uint32_t kRemoteBadFrameBurstWindowUs = 200'000U;
 inline constexpr uint32_t kRemoteBadFrameBurstThreshold = 5U;
 
+// Debug-only: bypass SafetyPolicy enforcement (still records flags).
+// Note: you can also toggle via remote switch (see domain::remote config).
+inline constexpr bool kBypassSafetyPolicy = false;
+
 // IST8310 async I2C recovery.
 inline constexpr uint32_t kIstBackoffUs = 500'000U;
 inline constexpr uint32_t kIstFailStreakThreshold = 3U;
 
 // Manual fallback mapping (temporary until full control algorithm is implemented).
-inline constexpr float kWheelCurrentScale_mA = 300.0f;
+inline constexpr float kWheelCurrentScale_mA = 8000.0f;
 inline constexpr float kRcDeadband = 0.05f;
 
 // Topology (current hard-coded robot setup).
@@ -55,9 +60,9 @@ inline constexpr uint16_t kDm4310IdBase = 1U;
 // Tune these constants for your chassis.
 inline constexpr float kWheelRadiusM = 0.06f;
 inline constexpr float kWheelTrackM = 0.30f;      // wheel-to-wheel distance (m)
-inline constexpr float kWheelGearRatio = 19.2f;   // gearbox reduction ratio
-inline constexpr int8_t kWheelRpmSignLeft = 1;    // set to -1 if wiring direction is inverted
-inline constexpr int8_t kWheelRpmSignRight = 1;   // set to -1 if wiring direction is inverted
+inline constexpr float kWheelGearRatio = 1.0f;    // gearbox reduction ratio
+inline constexpr int8_t kWheelRpmSignLeft = 1;    // forward: left wheel CCW (rear->front view)
+inline constexpr int8_t kWheelRpmSignRight = -1;  // forward: right wheel CW (rear->front view)
 inline constexpr uint32_t kOdomTimeoutUs = 200'000U;
 
 // Minimal closed-loop controller defaults (tune on real robot).
@@ -65,5 +70,28 @@ inline constexpr float kMaxVxMps = 1.5f;          // hl_cmd.vx in [-1,1] -> m/s
 inline constexpr float kMaxWzRps = 3.0f;          // hl_cmd.wz in [-1,1] -> rad/s
 inline constexpr float kWheelVelKp_mA_per_mps = 3000.0f;
 inline constexpr int16_t kWheelCurrentLimit_mA = 12000;
+
+// Joint hold/debug settings (DM4310).
+inline constexpr float kJointHoldKp = 20.0f;
+inline constexpr float kJointHoldKd = 0.5f;
+inline constexpr std::array<float, 4> kJointStandPosRad = {
+    -0.0978488922f,
+    0.126077652f,
+    0.0520715714f,
+    0.631914139f,
+};
+inline constexpr float kJointTestAmplitudeRad = 0.35f;
+inline constexpr float kJointTestFreqHz = 0.5f;
+inline constexpr uint32_t kJointTestSegmentUs = 2'000'000U;
+
+// CAN telemetry (state estimate) output.
+inline constexpr uint8_t kEstimateTxBus = 1U;
+inline constexpr uint32_t kEstimateTxPeriodUs = 20'000U;  // 50 Hz
+inline constexpr uint16_t kEstimateTxRpyId = 0x7B0U;
+inline constexpr uint16_t kEstimateTxVelId = 0x7B1U;
+inline constexpr uint16_t kEstimateTxPosId = 0x7B2U;
+inline constexpr float kEstimateRpyScale = 10000.0f;  // rad -> 1e-4 rad
+inline constexpr float kEstimateVelScale = 1000.0f;   // m/s -> mm/s
+inline constexpr float kEstimatePosScale = 100.0f;    // m -> cm
 
 }  // namespace robotapp::domain::config

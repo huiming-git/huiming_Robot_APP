@@ -29,7 +29,7 @@ inline constexpr std::array<AxisConfig, 8> kAxisCfg = {
 };
 
 // Map SBUS channels to 3-position switch states sw[0..3] (0/1/2).
-inline constexpr std::array<uint8_t, 4> kSwitchMap = {8, 9, 10, 11};
+inline constexpr std::array<uint8_t, 4> kSwitchMap = {4, 5, 6, 7};
 inline constexpr uint16_t kSwitchMid = 1000U;
 inline constexpr uint16_t kSwitchHi = 1500U;
 inline constexpr uint32_t kSwitchDebounceUs = 20'000U;
@@ -39,9 +39,17 @@ inline constexpr uint32_t kSwitchDebounceUs = 20'000U;
 inline constexpr uint8_t kEnableSwitchIdx = 0;      // RemoteState.sw[k]
 inline constexpr uint8_t kEnableSwitchOn = 2;       // position meaning "enabled"
 inline constexpr uint8_t kEStopSwitchIdx = 1;       // RemoteState.sw[k]
-inline constexpr uint8_t kEStopSwitchOn = 0;        // position meaning "E-Stop"
-inline constexpr uint8_t kModeSwitchIdx = 2;        // RemoteState.sw[k]
-// Mode mapping: 0->Safe, 1->Manual, 2->Auto.
+inline constexpr uint8_t kEStopSwitchOn = 2;        // position meaning "E-Stop" (high)
+inline constexpr uint8_t kModeSwitchIdx = 2;        // RemoteState.sw[k] (2-position: Safe/Auto)
+// Mode mapping: 0->Safe, 1->Manual, 2->Auto (Manual unreachable on 2-position switch).
+
+// Debug: bypass safety policy (disabled on this transmitter layout).
+inline constexpr uint8_t kDebugBypassSafetySwitchIdx = 3;
+inline constexpr uint8_t kDebugBypassSafetySwitchOn = 3;  // unreachable (sw only has 0/1/2)
+
+// Joint hold switch: high = hold to stand pose.
+inline constexpr uint8_t kJointHoldSwitchIdx = 3;
+inline constexpr uint8_t kJointHoldSwitchOn = 2;
 
 // E-stop latch behavior:
 // - Once E-stop is asserted, it stays latched until reset condition holds.

@@ -101,6 +101,12 @@ extern volatile uint8_t g_robotapp_dm_last_motor_id;
 extern volatile float g_robotapp_dm_pos[4];
 extern volatile float g_robotapp_dm_vel[4];
 extern volatile float g_robotapp_dm_tor[4];
+extern volatile uint16_t g_robotapp_dm_tx_last_std_id;
+extern volatile uint32_t g_robotapp_dm_tx_attempt[4];
+extern volatile uint32_t g_robotapp_dm_tx_started[4];
+extern volatile uint16_t g_robotapp_dm_enable_tx_last_std_id;
+extern volatile uint32_t g_robotapp_dm_enable_tx_attempt[4];
+extern volatile uint32_t g_robotapp_dm_enable_tx_started[4];
 extern volatile uint32_t g_robotapp_safety_flags;
 extern volatile uint32_t g_robotapp_heap_started;
 extern volatile uint32_t g_robotapp_heap_malloc_calls;
@@ -121,6 +127,15 @@ extern App_MagCalibration g_robotapp_mag_calib;
 extern App_SafetyConfig g_robotapp_safety_cfg;
 extern App_WheelOdomConfig g_robotapp_wheel_odom_cfg;
 extern App_WheelControllerConfig g_robotapp_wheel_ctrl_cfg;
+extern volatile int16_t g_robotapp_wheel_cmd_mA[2];
+extern volatile uint8_t g_app_can2_dbg_enable;
+extern volatile uint16_t g_app_can2_dbg_std_id;
+extern volatile uint16_t g_app_can2_dbg_ids[4];
+extern volatile uint8_t g_app_can2_dbg_dlc;
+extern volatile uint8_t g_app_can2_dbg_data[8];
+extern volatile uint32_t g_app_can2_dbg_period_ms;
+extern volatile uint32_t g_app_can2_dbg_sent;
+extern volatile uint32_t g_app_can2_dbg_failed;
 
 #ifdef __cplusplus
 }

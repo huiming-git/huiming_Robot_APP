@@ -113,7 +113,7 @@ inline std::array<uint8_t, 8> pack_control(float kp, float kd, float pos, float 
 inline bool decode_feedback(const uint8_t data[8], Feedback& out)
 {
   const uint8_t motor_id = static_cast<uint8_t>(data[0] & 0x0FU);
-  if (motor_id < 1U || motor_id > 4U) return false;
+  if (motor_id > 15U) return false;
 
   const int p_int = (static_cast<int>(data[1]) << 8) | static_cast<int>(data[2]);
   const int v_int = (static_cast<int>(data[3]) << 4) | (static_cast<int>(data[4]) >> 4);
@@ -130,4 +130,3 @@ inline bool decode_feedback(const uint8_t data[8], Feedback& out)
 }
 
 }  // namespace robotapp::drivers::dm4310
-

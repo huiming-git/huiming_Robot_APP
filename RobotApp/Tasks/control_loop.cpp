@@ -1,8 +1,11 @@
 #include "RobotApp/Tasks/control_loop.hpp"
 
 #include "RobotApp/Domain/config.hpp"
+#include "RobotApp/Domain/remote_config.hpp"
+#include "RobotApp/Estimation/kalman_1d.hpp"
 
 #include <span>
+#include <cmath>
 
 #include "RobotApp/Algo/chassis_controller.hpp"
 #include "RobotApp/Drivers/motors.hpp"
@@ -32,10 +35,146 @@ volatile uint8_t g_robotapp_dm_last_motor_id = 0;
 volatile float g_robotapp_dm_pos[4] = {0};
 volatile float g_robotapp_dm_vel[4] = {0};
 volatile float g_robotapp_dm_tor[4] = {0};
+volatile uint16_t g_robotapp_dm_tx_last_std_id = 0;
+volatile uint32_t g_robotapp_dm_tx_attempt[4] = {0, 0, 0, 0};
+volatile uint32_t g_robotapp_dm_tx_started[4] = {0, 0, 0, 0};
+volatile uint16_t g_robotapp_dm_enable_tx_last_std_id = 0;
+volatile uint32_t g_robotapp_dm_enable_tx_attempt[4] = {0, 0, 0, 0};
+volatile uint32_t g_robotapp_dm_enable_tx_started[4] = {0, 0, 0, 0};
+volatile uint8_t g_robotapp_dm_bringup_index = 0;
+volatile uint8_t g_robotapp_dm_bringup_done = 0;
+volatile uint8_t g_robotapp_dm_bringup_step[4] = {0};
 volatile uint32_t g_robotapp_safety_flags = 0;
 }
 
 namespace robotapp::tasks {
+
+namespace {
+
+constexpr float kPi = 3.14159265358979323846f;
+constexpr float kDegToRad = kPi / 180.0f;
+constexpr int32_t kDjiEncMod = 8192;
+constexpr int32_t kDjiEncHalf = kDjiEncMod / 2;
+
+struct EstimateFilter {
+  std::array<estimation::Kalman1D, 3> rpy{};
+  std::array<estimation::Kalman1D, 3> vel{};
+  std::array<estimation::Kalman1D, 3> pos{};
+  uint64_t last_est_ts_us = 0;
+  uint64_t last_tx_ts_us = 0;
+
+  void reset()
+  {
+    for (auto& k : rpy) k.reset();
+    for (auto& k : vel) k.reset();
+    for (auto& k : pos) k.reset();
+    last_est_ts_us = 0;
+    last_tx_ts_us = 0;
+
+    // Slightly different tunings per signal group.
+    for (auto& k : rpy) k.set_tunings(0.001f, 0.05f);
+    for (auto& k : vel) k.set_tunings(0.01f, 0.10f);
+    for (auto& k : pos) k.set_tunings(0.001f, 0.50f);
+  }
+};
+
+EstimateFilter g_est_filter{};
+
+inline int16_t clamp_i16(int32_t v)
+{
+  if (v > 32767) return 32767;
+  if (v < -32768) return -32768;
+  return static_cast<int16_t>(v);
+}
+
+inline int16_t float_to_i16(float v, float scale)
+{
+  const float scaled = v * scale;
+  const int32_t rounded = (scaled >= 0.0f) ? static_cast<int32_t>(scaled + 0.5f)
+                                           : static_cast<int32_t>(scaled - 0.5f);
+  return clamp_i16(rounded);
+}
+
+inline void pack_i16(int16_t v, uint8_t* out)
+{
+  out[0] = static_cast<uint8_t>(v & 0xFF);
+  out[1] = static_cast<uint8_t>((static_cast<uint16_t>(v) >> 8) & 0xFF);
+}
+
+static domain::StateEstimate filter_estimate(const domain::StateEstimate& est)
+{
+  domain::StateEstimate out = est;
+  if (est.ts_us == 0U) return out;
+
+  float dt_s = 0.0f;
+  if (g_est_filter.last_est_ts_us != 0U && est.ts_us >= g_est_filter.last_est_ts_us)
+  {
+    dt_s = static_cast<float>(est.ts_us - g_est_filter.last_est_ts_us) * 1.0e-6f;
+  }
+  g_est_filter.last_est_ts_us = est.ts_us;
+
+  if (est.valid != 0U && dt_s > 0.0f && dt_s < 0.1f)
+  {
+    for (int i = 0; i < 3; ++i)
+    {
+      out.rpy_rad[i] = g_est_filter.rpy[i].update(est.rpy_rad[i], dt_s);
+      out.vel_mps[i] = g_est_filter.vel[i].update(est.vel_mps[i], dt_s);
+      out.pos_m[i] = g_est_filter.pos[i].update(est.pos_m[i], dt_s);
+    }
+  }
+  else if (est.valid == 0U)
+  {
+    // Reset if the upstream estimator becomes invalid.
+    g_est_filter.reset();
+  }
+  return out;
+}
+
+static void send_estimate_telemetry(platform::CanPort& can_port,
+                                    uint64_t now_us,
+                                    const domain::StateEstimate& est)
+{
+  if (now_us == 0U) return;
+  if (g_est_filter.last_tx_ts_us != 0U &&
+      (now_us - g_est_filter.last_tx_ts_us < domain::config::kEstimateTxPeriodUs))
+  {
+    return;
+  }
+  if (est.ts_us == 0U) return;
+
+  uint8_t payload[8] = {0};
+
+  // RPY (rad): roll, pitch, yaw
+  pack_i16(float_to_i16(est.rpy_rad[0], domain::config::kEstimateRpyScale), &payload[0]);
+  pack_i16(float_to_i16(est.rpy_rad[1], domain::config::kEstimateRpyScale), &payload[2]);
+  pack_i16(float_to_i16(est.rpy_rad[2], domain::config::kEstimateRpyScale), &payload[4]);
+  payload[6] = static_cast<uint8_t>(est.valid ? 1U : 0U);
+  payload[7] = 0U;
+  (void)can_port.tx(domain::config::kEstimateTxBus, domain::config::kEstimateTxRpyId,
+                    std::span<const uint8_t>(payload, sizeof(payload)), platform::OpNone());
+
+  // Velocity (m/s)
+  pack_i16(float_to_i16(est.vel_mps[0], domain::config::kEstimateVelScale), &payload[0]);
+  pack_i16(float_to_i16(est.vel_mps[1], domain::config::kEstimateVelScale), &payload[2]);
+  pack_i16(float_to_i16(est.vel_mps[2], domain::config::kEstimateVelScale), &payload[4]);
+  payload[6] = static_cast<uint8_t>(est.valid ? 1U : 0U);
+  payload[7] = 0U;
+  (void)can_port.tx(domain::config::kEstimateTxBus, domain::config::kEstimateTxVelId,
+                    std::span<const uint8_t>(payload, sizeof(payload)), platform::OpNone());
+
+  // Position (m)
+  pack_i16(float_to_i16(est.pos_m[0], domain::config::kEstimatePosScale), &payload[0]);
+  pack_i16(float_to_i16(est.pos_m[1], domain::config::kEstimatePosScale), &payload[2]);
+  pack_i16(float_to_i16(est.pos_m[2], domain::config::kEstimatePosScale), &payload[4]);
+  payload[6] = static_cast<uint8_t>(est.valid ? 1U : 0U);
+  payload[7] = 0U;
+  (void)can_port.tx(domain::config::kEstimateTxBus, domain::config::kEstimateTxPosId,
+                    std::span<const uint8_t>(payload, sizeof(payload)), platform::OpNone());
+
+  g_est_filter.last_tx_ts_us = now_us;
+}
+
+}  // namespace
 
 void ControlLoop::init()
 {
@@ -47,6 +186,12 @@ void ControlLoop::init()
   last_cmd_valid_ = false;
   last_cmd_ts_us_ = 0;
   last_wheels_fb_ts_us_ = 0;
+  last_est_filtered_ = {};
+  lqr_state_ = {};
+  wheel_odom_ = {};
+  dm_bringup_index_ = 0;
+  dm_bringup_done_ = false;
+  g_est_filter.reset();
 
   // Motors & manager wiring.
   motor_mgr_.clear();
@@ -65,6 +210,7 @@ void ControlLoop::tick(uint64_t ts_us)
 {
   const uint32_t dt_us =
       (last_ts_us_ == 0) ? 0U : static_cast<uint32_t>(ts_us - last_ts_us_);
+  const float dt_s = static_cast<float>(dt_us) * 1.0e-6f;
   last_ts_us_ = ts_us;
 
   telemetry_.ts_us = ts_us;
@@ -193,6 +339,71 @@ void ControlLoop::tick(uint64_t ts_us)
     g_robotapp_dm_pos[i] = st.pos;
     g_robotapp_dm_vel[i] = st.vel;
     g_robotapp_dm_tor[i] = st.torque;
+    g_robotapp_dm_bringup_step[i] = dm_motors_[i].bringup_step();
+  }
+
+  const auto wheel_odom_cfg = RobotApp_WheelOdomConfigLatest();
+  const float ticks_to_m =
+      (wheel_odom_cfg.wheel_radius_m > 0.0f && wheel_odom_cfg.wheel_gear_ratio > 0.0f)
+          ? (2.0f * kPi * wheel_odom_cfg.wheel_radius_m) /
+                (wheel_odom_cfg.wheel_gear_ratio * kDjiEncMod)
+          : 0.0f;
+  float wheel_pos_m[2] = {0.0f, 0.0f};
+  float wheel_vel_mps[2] = {wheel_odom_[0].vel_mps, wheel_odom_[1].vel_mps};
+
+  if (wheels_rx_seen && ticks_to_m > 0.0f)
+  {
+    for (std::size_t i = 0; i < sensors_.wheels.size() && i < wheel_odom_.size(); ++i)
+    {
+      auto& ws = wheel_odom_[i];
+      const uint16_t enc = static_cast<uint16_t>(sensors_.wheels[i].encoder);
+      if (!ws.valid)
+      {
+        ws.last_enc = enc;
+        ws.valid = true;
+      }
+      else
+      {
+        int32_t diff = static_cast<int32_t>(enc) - static_cast<int32_t>(ws.last_enc);
+        if (diff > kDjiEncHalf) diff -= kDjiEncMod;
+        if (diff < -kDjiEncHalf) diff += kDjiEncMod;
+        ws.ticks += diff;
+        ws.last_enc = enc;
+      }
+
+      const float sign = (i == 0) ? static_cast<float>(wheel_odom_cfg.rpm_sign_left)
+                                  : static_cast<float>(wheel_odom_cfg.rpm_sign_right);
+      wheel_pos_m[i] = sign * static_cast<float>(ws.ticks) * ticks_to_m;
+
+      const float rpm = static_cast<float>(sensors_.wheels[i].rpm) * sign;
+      const float vel_meas = (wheel_odom_cfg.wheel_radius_m > 0.0f &&
+                              wheel_odom_cfg.wheel_gear_ratio > 0.0f)
+                                 ? (rpm * 2.0f * kPi / 60.0f) *
+                                       (wheel_odom_cfg.wheel_radius_m /
+                                        wheel_odom_cfg.wheel_gear_ratio)
+                                 : 0.0f;
+      if (dt_s > 0.0f && dt_s < 0.5f)
+      {
+        const float tau = 0.05f;
+        const float alpha = dt_s / (tau + dt_s);
+        ws.vel_mps = ws.vel_mps + alpha * (vel_meas - ws.vel_mps);
+      }
+      else
+      {
+        ws.vel_mps = vel_meas;
+      }
+      wheel_vel_mps[i] = ws.vel_mps;
+    }
+  }
+  else
+  {
+    for (std::size_t i = 0; i < wheel_odom_.size(); ++i)
+    {
+      const float sign = (i == 0) ? static_cast<float>(wheel_odom_cfg.rpm_sign_left)
+                                  : static_cast<float>(wheel_odom_cfg.rpm_sign_right);
+      wheel_pos_m[i] = sign * static_cast<float>(wheel_odom_[i].ticks) * ticks_to_m;
+      wheel_vel_mps[i] = wheel_odom_[i].vel_mps;
+    }
   }
 
   // 将当前反馈同步给逻辑层（100 Hz 将读取）。
@@ -240,10 +451,15 @@ void ControlLoop::tick(uint64_t ts_us)
   }
 
   // Safety: evaluate against the freshest possible sources (avoid 1-tick lag through SystemHealth).
+  const auto op_state = RobotApp_OperatorLatest();
   auto health_for_safety = RobotApp_SystemHealthLatest();
-  health_for_safety.operator_state = RobotApp_OperatorLatest();
+  health_for_safety.operator_state = op_state;
   const auto remote_state = RobotApp_RemoteLatest();
   const auto remote_diag = RobotApp_RemoteDiagLatest();
+  const bool bypass_safety =
+      domain::config::kBypassSafetyPolicy ||
+      (remote_state.sw[domain::remote::kDebugBypassSafetySwitchIdx] ==
+       domain::remote::kDebugBypassSafetySwitchOn);
   health_for_safety.remote_frames = remote_diag.frames;
   health_for_safety.remote_bad_frames = remote_diag.bad_frame;
   health_for_safety.remote_frame_lost = remote_state.frame_lost;
@@ -272,30 +488,51 @@ void ControlLoop::tick(uint64_t ts_us)
   const auto safety_cfg = RobotApp_SafetyConfigLatest();
   const auto decision = safety_.evaluate(health_for_safety, safety_cfg, ts_us);
   g_robotapp_safety_flags = decision.flags;
-  if (decision.global_stop(safety_cfg))
+  if (!bypass_safety)
   {
-    telemetry_.safety_global_stop_count += 1U;
-    cmd_ok = false;
-    hl_ok = false;
+    if (decision.global_stop(safety_cfg))
+    {
+      telemetry_.safety_global_stop_count += 1U;
+      cmd_ok = false;
+      hl_ok = false;
+    }
   }
+
+  const auto raw_est = RobotApp_StateEstimateLatest();
+  const auto filtered_est = filter_estimate(raw_est);
+  last_est_filtered_ = filtered_est;
+
+  const bool imu_fresh =
+      (sensor_snap.imu.ts_us != 0U) &&
+      (ts_us - sensor_snap.imu.ts_us <= domain::config::kImuTimeoutUs);
+  const bool wheel_fresh =
+      (last_wheels_fb_ts_us_ != 0U) &&
+      (ts_us - last_wheels_fb_ts_us_ <= domain::config::kOdomTimeoutUs);
+  lqr_state_.theta_rad = filtered_est.rpy_rad[1];
+  lqr_state_.theta_dot_rps = sensor_snap.imu.gyro_dps[1] * kDegToRad;
+  lqr_state_.x_m = 0.5f * (wheel_pos_m[0] + wheel_pos_m[1]);
+  lqr_state_.x_dot_mps = 0.5f * (wheel_vel_mps[0] + wheel_vel_mps[1]);
+  lqr_state_.ts_us = ts_us;
+  lqr_state_.valid = (filtered_est.valid != 0U && imu_fresh && wheel_fresh) ? 1U : 0U;
+
+  const bool lqr_enabled = (op_state.mode == domain::OperatorMode::Auto);
 
   if (!cmd_ok && hl_ok)
   {
-    const auto op = RobotApp_OperatorLatest();
-    const auto estimate = RobotApp_StateEstimateLatest();
-    const auto wheel_odom_cfg = RobotApp_WheelOdomConfigLatest();
     const auto wheel_ctrl_cfg = RobotApp_WheelControllerConfigLatest();
     const algo::ChassisControllerInput cin{
         .ts_us = ts_us,
         .dt_us = dt_us,
         .sensors = &sensor_snap,
-        .estimate = &estimate,
+        .estimate = &filtered_est,
+        .lqr = &lqr_state_,
         .wheel_odom_cfg = &wheel_odom_cfg,
         .wheel_ctrl_cfg = &wheel_ctrl_cfg,
-        .operator_state = &op,
+        .operator_state = &op_state,
         .hl_cmd = &hl,
     };
-    const auto controller = controller_.load(std::memory_order_relaxed);
+    const auto controller =
+        lqr_enabled ? controller_.load(std::memory_order_relaxed) : nullptr;
     const auto cout = controller != nullptr ? controller(cin) : algo::chassis_controller_step(cin);
     if (cout.cmd_valid)
     {
@@ -318,15 +555,18 @@ void ControlLoop::tick(uint64_t ts_us)
   else
   {
     // If a CAN bus is dead, zero only the actuators on that bus.
-    if (decision.wheels_stop(safety_cfg))
+    if (!bypass_safety)
     {
-      telemetry_.wheels_stop_count += 1U;
-      for (auto& w : cmd.wheels) w.current = 0;
-    }
-    if (decision.joints_stop(safety_cfg))
-    {
-      telemetry_.joints_stop_count += 1U;
-      for (auto& j : cmd.joints) j = {};
+      if (decision.wheels_stop(safety_cfg))
+      {
+        telemetry_.wheels_stop_count += 1U;
+        for (auto& w : cmd.wheels) w.current = 0;
+      }
+      if (decision.joints_stop(safety_cfg))
+      {
+        telemetry_.joints_stop_count += 1U;
+        for (auto& j : cmd.joints) j = {};
+      }
     }
   }
 
@@ -345,6 +585,40 @@ void ControlLoop::tick(uint64_t ts_us)
                              : (used_hl)        ? 2U
                              : (used_direct_cmd) ? 1U
                                                 : 0U;
+
+  const uint8_t joint_sw = remote_state.sw[domain::remote::kJointHoldSwitchIdx];
+  const bool joint_hold =
+      op_state.enabled && !op_state.e_stop &&
+      (joint_sw == domain::remote::kJointHoldSwitchOn) &&
+      (bypass_safety || !decision.joints_stop(safety_cfg));
+  if (joint_hold)
+  {
+    for (std::size_t i = 0; i < cmd.joints.size() && i < sensors_.joints.size(); ++i)
+    {
+      cmd.joints[i].mode = domain::JointMode::Position;
+      cmd.joints[i].kp = domain::config::kJointHoldKp;
+      cmd.joints[i].kd = domain::config::kJointHoldKd;
+      cmd.joints[i].vel = 0.0f;
+      cmd.joints[i].tau = 0.0f;
+      cmd.joints[i].pos =
+          (i < domain::config::kJointStandPosRad.size()) ? domain::config::kJointStandPosRad[i]
+                                                         : 0.0f;
+    }
+  }
+
+  // Apply wheel direction mapping so positive command means "forward".
+  if (!cmd.wheels.empty())
+  {
+    const int8_t left_sign = (wheel_odom_cfg.rpm_sign_left < 0) ? -1 : 1;
+    const int8_t right_sign = (wheel_odom_cfg.rpm_sign_right < 0) ? -1 : 1;
+    cmd.wheels[0].current =
+        clamp_i16(static_cast<int32_t>(cmd.wheels[0].current) * static_cast<int32_t>(left_sign));
+    if (cmd.wheels.size() > 1U)
+    {
+      cmd.wheels[1].current =
+          clamp_i16(static_cast<int32_t>(cmd.wheels[1].current) * static_cast<int32_t>(right_sign));
+    }
+  }
 
   for (std::size_t i = 0; i < telemetry_.wheel_current_error_mA.size() && i < cmd.wheels.size() &&
                           i < sensors_.wheels.size();
@@ -367,7 +641,50 @@ void ControlLoop::tick(uint64_t ts_us)
     dm_motors_[i].set_command(cmd.joints[i]);
   }
 
-  motor_mgr_.tick_all(ts_us);
+  // DM4310 bringup: enable motors one-by-one to reduce bus contention.
+  if (!dm_bringup_done_)
+  {
+    while (dm_bringup_index_ < dm_motors_.size() &&
+           dm_motors_[dm_bringup_index_].bringup_done())
+    {
+      dm_bringup_index_++;
+    }
+    if (dm_bringup_index_ >= dm_motors_.size())
+    {
+      dm_bringup_done_ = true;
+    }
+  }
+
+  g_robotapp_dm_bringup_index =
+      (dm_bringup_index_ < dm_motors_.size()) ? static_cast<uint8_t>(dm_bringup_index_) : 0xFFU;
+  g_robotapp_dm_bringup_done = dm_bringup_done_ ? 1U : 0U;
+
+  dji_group_.tick(ts_us);
+  if (dm_bringup_done_)
+  {
+    for (auto& m : dm_motors_) m.tick(ts_us);
+  }
+  else
+  {
+    for (std::size_t i = 0; i < dm_bringup_index_ && i < dm_motors_.size(); ++i)
+    {
+      dm_motors_[i].tick(ts_us);
+    }
+    if (dm_bringup_index_ < dm_motors_.size())
+    {
+      dm_motors_[dm_bringup_index_].tick(ts_us);
+    }
+
+    if (dm_bringup_index_ < dm_motors_.size() &&
+        dm_motors_[dm_bringup_index_].bringup_done())
+    {
+      dm_bringup_index_++;
+      if (dm_bringup_index_ >= dm_motors_.size()) dm_bringup_done_ = true;
+    }
+  }
+
+  // Send estimator telemetry (Kalman-smoothed) on CAN.
+  send_estimate_telemetry(can_port_, ts_us, filtered_est);
 }
 
 }  // namespace robotapp::tasks

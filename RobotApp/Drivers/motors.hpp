@@ -110,6 +110,15 @@ class Dm4310Motor : public MotorInterface {
     if (f.bus != bus_) return false;
     dm4310::Feedback fb{};
     if (!dm4310::decode_feedback(f.data, fb)) return false;
+    const uint8_t expected_id = static_cast<uint8_t>(std_id_ & 0xFFU);
+    const uint16_t expected_master =
+        (expected_id == 0U) ? static_cast<uint16_t>(dm4310::kMasterIdBase - 1U)
+                            : static_cast<uint16_t>(dm4310::kMasterIdBase + expected_id - 1U);
+    const bool id_match =
+        (fb.motor_id == expected_id) ||
+        (f.std_id == expected_id) ||
+        (f.std_id == expected_master);
+    if (!id_match) return false;
     last_motor_id_ = fb.motor_id;
     state_.pos = fb.pos;
     state_.vel = fb.vel;
@@ -125,6 +134,7 @@ class Dm4310Motor : public MotorInterface {
       const bool started =
           can_->tx(bus_, std_id_, std::span<const uint8_t>(data.data(), 8),
                    platform::OpCallback(RobotApp_MotorCanTxCallback, &tx_cb_ctx_));
+      record_tx_stats(std_id_, started);
       if (!started)
       {
         if (bus_ == 1U)
@@ -144,6 +154,17 @@ class Dm4310Motor : public MotorInterface {
   uint8_t last_motor_id() const { return last_motor_id_; }
 
  protected:
+  void record_tx_stats(uint16_t std_id, bool started) const
+  {
+    g_robotapp_dm_tx_last_std_id = std_id;
+    if (std_id >= 1U && std_id <= 4U)
+    {
+      const std::size_t idx = static_cast<std::size_t>(std_id - 1U);
+      g_robotapp_dm_tx_attempt[idx] += 1U;
+      if (started) g_robotapp_dm_tx_started[idx] += 1U;
+    }
+  }
+
   std::array<uint8_t, 8> build_payload() const
   {
     switch (cmd_.mode)
@@ -193,6 +214,9 @@ class Dm4310MotorWithBringup final : public Dm4310Motor {
   Dm4310MotorWithBringup() = default;
   Dm4310MotorWithBringup(uint8_t can_bus, uint16_t std_id) : Dm4310Motor(can_bus, std_id) {}
 
+  bool bringup_done() const { return bringup_step_ >= 2U; }
+  uint8_t bringup_step() const { return bringup_step_; }
+
   bool handle_frame(const platform::CanFrame& f) override
   {
     const bool handled = Dm4310Motor::handle_frame(f);
@@ -203,12 +227,10 @@ class Dm4310MotorWithBringup final : public Dm4310Motor {
   void tick(uint64_t ts_us) override
   {
     (void)ts_us;
-    if (bringup_step_ < 3U)
+    if (bringup_step_ < 2U)
     {
-      const uint8_t tail = (bringup_step_ == 0U)
-                               ? dm4310::kCmdDisableTail
-                               : (bringup_step_ == 1U) ? dm4310::kCmdEnableTail
-                                                       : dm4310::kCmdZeroTail;
+      const uint8_t tail =
+          (bringup_step_ == 0U) ? dm4310::kCmdDisableTail : dm4310::kCmdZeroTail;
       const auto data = dm4310::pack_special(tail);
       (void)tx_with_stats(std::span<const uint8_t>(data.data(), 8));
       if (++bringup_tick_ >= 10U)
@@ -229,6 +251,7 @@ class Dm4310MotorWithBringup final : public Dm4310Motor {
     const bool started = (can_ != nullptr) &&
                          can_->tx(bus_, std_id_, payload,
                                   platform::OpCallback(RobotApp_MotorCanTxCallback, &tx_cb_ctx_));
+    record_tx_stats(std_id_, started);
     if (!started)
     {
       if (bus_ == 1U)
