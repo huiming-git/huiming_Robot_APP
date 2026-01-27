@@ -35,19 +35,17 @@
 
             "interface": "swd",
             "device": "STM32F407IGH6",
-            "runToEntryPoint": "main",
-
-            
+ 
             "showDevDebugOutput": "raw",
 
-            "liveWatch": { "enabled": true },
+            "liveWatch": { "enabled": true, "samplesPerSecond": 2 },
 
             "postRestartCommands": [
-                "monitor reset halt"
+                "monitor reset run"
             ]
         },
         {
-            "name": "Cortex-Debug: OpenOCD (ST-Link, SWD)",
+            "name": "Cortex-Debug: OpenOCD (DAPLINK, SWD)",
             "type": "cortex-debug",
             "request": "launch",
 
@@ -56,23 +54,22 @@
 
             "servertype": "openocd",
             "interface": "swd",
+            // 【核心】这里只写我们刚才新建的那个文件名
+            // 注意：确保 force_hid.cfg 文件就在你打开的 VS Code 根目录下
             "configFiles": [
-                "interface/stlink.cfg",
-                "target/stm32f4x.cfg"
+                "force_hid.cfg" 
             ],
-
             "gdbPath": "C:/Toolchain/arm-none-eabi/bin/arm-none-eabi-gdb.exe",
             "openOCDPath": "C:/Program Files (x86)/openocd/bin/openocd.exe",
             "searchDir": [
                 "C:/Program Files (x86)/openocd/openocd/scripts"
             ],
 
-            "runToEntryPoint": "main",
             "rtos": "FreeRTOS",
             "showDevDebugOutput": "raw",
-            "liveWatch": { "enabled": true, "samplesPerSecond": 10 },
+            "liveWatch": { "enabled": true, "samplesPerSecond": 2 },
             "postRestartCommands": [
-                "monitor reset halt"
+                "monitor reset run"
             ]
         }
 

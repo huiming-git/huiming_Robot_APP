@@ -19,6 +19,8 @@ extern volatile uint32_t g_app_sbus_pipe_dropped;
 // - rx_bytes:  how many bytes were pushed into the SBUS pipe total
 extern volatile uint32_t g_app_sbus_rx_events;
 extern volatile uint32_t g_app_sbus_rx_bytes;
+extern volatile uint32_t g_app_sbus_uart_errors;
+extern volatile uint32_t g_app_sbus_uart_last_error;
 
 #ifdef __cplusplus
 }

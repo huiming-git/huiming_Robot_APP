@@ -55,6 +55,7 @@ constexpr float kPi = 3.14159265358979323846f;
 constexpr float kDegToRad = kPi / 180.0f;
 constexpr int32_t kDjiEncMod = 8192;
 constexpr int32_t kDjiEncHalf = kDjiEncMod / 2;
+constexpr std::size_t kDmTxPerTick = 2;
 
 struct EstimateFilter {
   std::array<estimation::Kalman1D, 3> rpy{};
@@ -190,6 +191,7 @@ void ControlLoop::init()
   lqr_state_ = {};
   wheel_odom_ = {};
   dm_bringup_index_ = 0;
+  dm_tx_index_ = 0;
   dm_bringup_done_ = false;
   g_est_filter.reset();
 
@@ -593,16 +595,33 @@ void ControlLoop::tick(uint64_t ts_us)
       (bypass_safety || !decision.joints_stop(safety_cfg));
   if (joint_hold)
   {
+    if (!joint_hold_active_)
+    {
+      joint_hold_active_ = true;
+      joint_hold_start_us_ = ts_us;
+    }
+  }
+  else
+  {
+    joint_hold_active_ = false;
+    joint_hold_start_us_ = 0;
+  }
+  if (joint_hold)
+  {
+    const bool in_soft_start =
+        (joint_hold_start_us_ != 0U) && (ts_us - joint_hold_start_us_ < 2'000'000U);
+    const float kp =
+        in_soft_start ? (domain::config::kJointHoldKp * 0.5f) : domain::config::kJointHoldKp;
     for (std::size_t i = 0; i < cmd.joints.size() && i < sensors_.joints.size(); ++i)
     {
       cmd.joints[i].mode = domain::JointMode::Position;
-      cmd.joints[i].kp = domain::config::kJointHoldKp;
+      cmd.joints[i].kp = kp;
       cmd.joints[i].kd = domain::config::kJointHoldKd;
       cmd.joints[i].vel = 0.0f;
       cmd.joints[i].tau = 0.0f;
-      cmd.joints[i].pos =
-          (i < domain::config::kJointStandPosRad.size()) ? domain::config::kJointStandPosRad[i]
-                                                         : 0.0f;
+      float target = (i < 4U) ? g_robotapp_joint_hold_pos[i] : 0.0f;
+      if (!std::isfinite(target)) target = 0.0f;
+      cmd.joints[i].pos = target;
     }
   }
 
@@ -655,33 +674,35 @@ void ControlLoop::tick(uint64_t ts_us)
     }
   }
 
+  dji_group_.tick(ts_us);
+
+  // Stagger DM4310 CAN commands: send only one motor per control tick.
+  if (!dm_motors_.empty())
+  {
+    if (dm_bringup_done_)
+    {
+      for (std::size_t n = 0; n < kDmTxPerTick; ++n)
+      {
+        if (dm_tx_index_ >= dm_motors_.size()) dm_tx_index_ = 0;
+        dm_motors_[dm_tx_index_].tick(ts_us);
+        dm_tx_index_++;
+      }
+      if (dm_tx_index_ >= dm_motors_.size()) dm_tx_index_ = 0;
+    }
+    else if (dm_bringup_index_ < dm_motors_.size())
+    {
+      dm_motors_[dm_bringup_index_].tick(ts_us);
+      if (dm_motors_[dm_bringup_index_].bringup_done())
+      {
+        dm_bringup_index_++;
+        if (dm_bringup_index_ >= dm_motors_.size()) dm_bringup_done_ = true;
+      }
+    }
+  }
+
   g_robotapp_dm_bringup_index =
       (dm_bringup_index_ < dm_motors_.size()) ? static_cast<uint8_t>(dm_bringup_index_) : 0xFFU;
   g_robotapp_dm_bringup_done = dm_bringup_done_ ? 1U : 0U;
-
-  dji_group_.tick(ts_us);
-  if (dm_bringup_done_)
-  {
-    for (auto& m : dm_motors_) m.tick(ts_us);
-  }
-  else
-  {
-    for (std::size_t i = 0; i < dm_bringup_index_ && i < dm_motors_.size(); ++i)
-    {
-      dm_motors_[i].tick(ts_us);
-    }
-    if (dm_bringup_index_ < dm_motors_.size())
-    {
-      dm_motors_[dm_bringup_index_].tick(ts_us);
-    }
-
-    if (dm_bringup_index_ < dm_motors_.size() &&
-        dm_motors_[dm_bringup_index_].bringup_done())
-    {
-      dm_bringup_index_++;
-      if (dm_bringup_index_ >= dm_motors_.size()) dm_bringup_done_ = true;
-    }
-  }
 
   // Send estimator telemetry (Kalman-smoothed) on CAN.
   send_estimate_telemetry(can_port_, ts_us, filtered_est);

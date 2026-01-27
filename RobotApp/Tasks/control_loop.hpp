@@ -44,7 +44,10 @@ class ControlLoop {
   domain::StateEstimate last_est_filtered_{};
   domain::LqrState lqr_state_{};
   std::size_t dm_bringup_index_ = 0;
+  std::size_t dm_tx_index_ = 0;
   bool dm_bringup_done_ = false;
+  bool joint_hold_active_ = false;
+  uint64_t joint_hold_start_us_ = 0;
   struct JointDebugState {
     bool has_home = false;
     std::array<float, 4> home{};

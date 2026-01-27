@@ -52,7 +52,7 @@ struct JointState {
 
 struct RemoteState {
   float ch[8] = {0};      // normalized -1..1
-  uint8_t sw[4] = {0};    // switch states
+  uint8_t sw[5] = {0};    // switch states
   bool frame_lost = false;
   bool failsafe = false;  // signal lost
   uint64_t ts_us = 0;

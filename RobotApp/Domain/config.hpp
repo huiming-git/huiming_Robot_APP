@@ -47,7 +47,7 @@ inline constexpr uint32_t kIstBackoffUs = 500'000U;
 inline constexpr uint32_t kIstFailStreakThreshold = 3U;
 
 // Manual fallback mapping (temporary until full control algorithm is implemented).
-inline constexpr float kWheelCurrentScale_mA = 8000.0f;
+inline constexpr float kWheelCurrentScale_mA = 10000.0f;
 inline constexpr float kRcDeadband = 0.05f;
 
 // Topology (current hard-coded robot setup).
@@ -61,24 +61,30 @@ inline constexpr uint16_t kDm4310IdBase = 1U;
 inline constexpr float kWheelRadiusM = 0.06f;
 inline constexpr float kWheelTrackM = 0.30f;      // wheel-to-wheel distance (m)
 inline constexpr float kWheelGearRatio = 1.0f;    // gearbox reduction ratio
-inline constexpr int8_t kWheelRpmSignLeft = 1;    // forward: left wheel CCW (rear->front view)
-inline constexpr int8_t kWheelRpmSignRight = -1;  // forward: right wheel CW (rear->front view)
+inline constexpr int8_t kWheelRpmSignLeft = -1;   // forward: left wheel CW (rear->front view)
+inline constexpr int8_t kWheelRpmSignRight = 1;   // forward: right wheel CCW (rear->front view)
 inline constexpr uint32_t kOdomTimeoutUs = 200'000U;
 
 // Minimal closed-loop controller defaults (tune on real robot).
 inline constexpr float kMaxVxMps = 1.5f;          // hl_cmd.vx in [-1,1] -> m/s
 inline constexpr float kMaxWzRps = 3.0f;          // hl_cmd.wz in [-1,1] -> rad/s
 inline constexpr float kWheelVelKp_mA_per_mps = 3000.0f;
-inline constexpr int16_t kWheelCurrentLimit_mA = 12000;
+inline constexpr int16_t kWheelCurrentLimit_mA = 15000;
+
+// Balance PID (torque in N*m).
+inline constexpr float kBalanceKp = 35.0f;
+inline constexpr float kBalanceKi = 0.0f;
+inline constexpr float kBalanceKd = 1.5f;
+inline constexpr float kBalanceIntLimit = 0.3f;
 
 // Joint hold/debug settings (DM4310).
-inline constexpr float kJointHoldKp = 20.0f;
-inline constexpr float kJointHoldKd = 0.5f;
+inline constexpr float kJointHoldKp = 32.0f;
+inline constexpr float kJointHoldKd = 1.0f;
 inline constexpr std::array<float, 4> kJointStandPosRad = {
-    -0.0978488922f,
-    0.126077652f,
-    0.0520715714f,
-    0.631914139f,
+    -0.651750565f,
+    0.645647049f,
+    0.167277336f,
+    -0.224880219f,
 };
 inline constexpr float kJointTestAmplitudeRad = 0.35f;
 inline constexpr float kJointTestFreqHz = 0.5f;

@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "RobotApp/Tasks/control_loop.hpp"
+#include "RobotApp/Domain/config.hpp"
 #include "RobotApp/Logic/logic_bus.hpp"
 #include "RobotApp/Logic/logic_context.hpp"
 #include "RobotApp/Inputs/remote_adapter.hpp"
@@ -106,6 +107,35 @@ static void maybe_factory_reset_gesture(const domain::RemoteState& st,
     RobotApp_FactoryResetParams();
     triggered = true;
   }
+}
+
+static void maybe_update_joint_hold_from_encoder(const domain::RemoteState& st,
+                                                 const domain::OperatorState& op)
+{
+  static uint8_t last_sw = 0;
+  const uint8_t sw = st.sw[domain::remote::kJointHoldUpdateSwitchIdxA];
+  if (st.failsafe || st.frame_lost) {
+    last_sw = sw;
+    return;
+  }
+
+  const bool rising = (sw == domain::remote::kJointHoldUpdateSwitchOn) &&
+                      (last_sw != domain::remote::kJointHoldUpdateSwitchOn);
+  if (rising)
+  {
+    if (!op.enabled)
+    {
+      g_robotapp_joint_hold_pos[0] = g_robotapp_dm_pos[0];
+      g_robotapp_joint_hold_pos[2] = g_robotapp_dm_pos[2];
+    }
+    else
+    {
+      g_robotapp_joint_hold_pos[1] = g_robotapp_dm_pos[1];
+      g_robotapp_joint_hold_pos[3] = g_robotapp_dm_pos[3];
+    }
+  }
+
+  last_sw = sw;
 }
 
 static void set_default_runtime_params(void)
@@ -293,6 +323,12 @@ App_SafetyConfig g_robotapp_safety_cfg = {};
 App_WheelOdomConfig g_robotapp_wheel_odom_cfg = {};
 App_WheelControllerConfig g_robotapp_wheel_ctrl_cfg = {};
 volatile int16_t g_robotapp_wheel_cmd_mA[2] = {0, 0};
+volatile float g_robotapp_joint_hold_pos[4] = {
+    robotapp::domain::config::kJointStandPosRad[0],
+    robotapp::domain::config::kJointStandPosRad[1],
+    robotapp::domain::config::kJointStandPosRad[2],
+    robotapp::domain::config::kJointStandPosRad[3],
+};
 }
 
 extern "C" void RobotApp_Init(void)
@@ -561,6 +597,7 @@ extern "C" void RobotApp_SbusFeedBytes(const uint8_t* data, uint16_t len, uint64
       g_robotapp_operator_state = op;  // debug mirror only
 
       robotapp::maybe_factory_reset_gesture(st, op, ts_us);
+      robotapp::maybe_update_joint_hold_from_encoder(st, op);
 
       auto diag = robotapp::g_remote.diagnostics();
       diag.sbus_pipe_dropped = static_cast<uint32_t>(g_app_sbus_pipe_dropped);

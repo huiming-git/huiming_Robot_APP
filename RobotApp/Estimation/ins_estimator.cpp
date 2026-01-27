@@ -137,6 +137,8 @@ void InsEstimator::reset(uint64_t ts_us)
   gyro_bias_rps_[0] = gyro_bias_rps_[1] = gyro_bias_rps_[2] = 0.0f;
   accel_bias_mps2_[0] = accel_bias_mps2_[1] = accel_bias_mps2_[2] = 0.0f;
   err_int_[0] = err_int_[1] = err_int_[2] = 0.0f;
+  mount_offset_valid_ = false;
+  mount_offset_rpy_[0] = mount_offset_rpy_[1] = mount_offset_rpy_[2] = 0.0f;
 }
 
 domain::StateEstimate InsEstimator::step(const domain::ImuState& imu, const domain::MagState* mag,
@@ -176,34 +178,6 @@ domain::StateEstimate InsEstimator::step(const domain::ImuState& imu, const doma
     return out;
   }
 
-  // Wheel odometry measurement (if available and fresh).
-  bool odom_ok = false;
-  float odom_v_fwd = 0.0f;
-  float odom_yaw_rate = 0.0f;
-  const auto& wc = wheel_odom_cfg_;
-  if ((motor != nullptr) && (motor->ts_us != 0U) &&
-      (age_us(ts_us, motor->ts_us) <= domain::config::kOdomTimeoutUs) && (wc.wheel_radius_m > 0.0f) &&
-      (wc.wheel_gear_ratio > 0.0f))
-  {
-    const float rpm_l =
-        static_cast<float>(motor->wheels[0].rpm) * static_cast<float>(wc.rpm_sign_left);
-    const float rpm_r =
-        static_cast<float>(motor->wheels[1].rpm) * static_cast<float>(wc.rpm_sign_right);
-    const float omega_l =
-        (rpm_l * 2.0f * kPi / 60.0f) / wc.wheel_gear_ratio;  // rad/s at wheel
-    const float omega_r =
-        (rpm_r * 2.0f * kPi / 60.0f) / wc.wheel_gear_ratio;
-
-    const float v_l = omega_l * wc.wheel_radius_m;
-    const float v_r = omega_r * wc.wheel_radius_m;
-    odom_v_fwd = 0.5f * (v_l + v_r);
-    if (wc.wheel_track_m > 0.0f)
-    {
-      odom_yaw_rate = (v_r - v_l) / wc.wheel_track_m;  // rad/s
-    }
-    odom_ok = std::isfinite(odom_v_fwd) && std::isfinite(odom_yaw_rate);
-  }
-
   // Gyro rad/s.
   float omega_rps[3] = {
       imu.gyro_dps[0] * kDegToRad,
@@ -215,13 +189,6 @@ domain::StateEstimate InsEstimator::step(const domain::ImuState& imu, const doma
   omega_rps[0] -= gyro_bias_rps_[0];
   omega_rps[1] -= gyro_bias_rps_[1];
   omega_rps[2] -= gyro_bias_rps_[2];
-
-  // Optional yaw-rate correction from wheel odometry (disabled by default).
-  if (odom_ok && (gains_.odom_yaw_gain > 0.0f))
-  {
-    const float yaw_err = odom_yaw_rate - omega_rps[2];
-    omega_rps[2] += gains_.odom_yaw_gain * yaw_err;
-  }
 
   // Accelerometer correction (gravity direction).
   float acc_b[3] = {
@@ -302,21 +269,6 @@ domain::StateEstimate InsEstimator::step(const domain::ImuState& imu, const doma
   vel_mps_[1] += acc_w[1] * dt_s;
   vel_mps_[2] += acc_w[2] * dt_s;
 
-  // Wheel-odometry correction (horizontal velocity observation).
-  if (odom_ok && (gains_.odom_vel_gain > 0.0f))
-  {
-    // Convert estimated vel to body frame, correct forward component, then rotate back to world.
-    float vel_b[3] = {0.0f, 0.0f, 0.0f};
-    quat_rotate_body_from_world(q_wxyz_, vel_mps_, vel_b);
-    const float k = clampf(gains_.odom_vel_gain, 0.0f, 1.0f);
-    vel_b[0] = vel_b[0] + k * (odom_v_fwd - vel_b[0]);
-    float vel_w_new[3] = {0.0f, 0.0f, 0.0f};
-    quat_rotate_world_from_body(q_wxyz_, vel_b, vel_w_new);
-    vel_mps_[0] = vel_w_new[0];
-    vel_mps_[1] = vel_w_new[1];
-    // Keep z from IMU integration (wheel odom doesn't observe vertical).
-  }
-
   pos_m_[0] += vel_mps_[0] * dt_s;
   pos_m_[1] += vel_mps_[1] * dt_s;
   pos_m_[2] += vel_mps_[2] * dt_s;
@@ -327,6 +279,15 @@ domain::StateEstimate InsEstimator::step(const domain::ImuState& imu, const doma
   out.q_wxyz[2] = q_wxyz_[2];
   out.q_wxyz[3] = q_wxyz_[3];
   quat_to_rpy(q_wxyz_, out.rpy_rad);
+  if (!mount_offset_valid_)
+  {
+    mount_offset_rpy_[0] = out.rpy_rad[0];
+    mount_offset_rpy_[1] = out.rpy_rad[1];
+    mount_offset_rpy_[2] = out.rpy_rad[2];
+    mount_offset_valid_ = true;
+  }
+  out.rpy_rad[0] -= mount_offset_rpy_[0];
+  out.rpy_rad[1] -= mount_offset_rpy_[1];
   out.pos_m[0] = pos_m_[0];
   out.pos_m[1] = pos_m_[1];
   out.pos_m[2] = pos_m_[2];

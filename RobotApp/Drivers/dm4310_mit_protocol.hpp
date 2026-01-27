@@ -90,7 +90,7 @@ inline std::array<uint8_t, 8> pack_special(uint8_t tail)
   return {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, tail};
 }
 
-inline std::array<uint8_t, 8> pack_control(float kp, float kd, float pos, float vel, float tor)
+inline std::array<uint8_t, 8> pack_control(float pos, float vel, float kp, float kd, float tor)
 {
   const uint16_t p_int = float_to_uint(pos, kPMin, kPMax, 16);
   const uint16_t v_int = float_to_uint(vel, kVMin, kVMax, 12);

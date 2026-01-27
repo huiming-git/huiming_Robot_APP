@@ -6,7 +6,6 @@
 
 namespace {
 
-constexpr float kLqrK[4] = {77.27f, 16.50f, -3.16f, -12.22f};
 constexpr float kMotorKt_NmPerA = 0.0156f;  // bare M3508 motor, no gearbox
 
 inline int16_t clamp_i16(int32_t v)
@@ -32,25 +31,61 @@ namespace robotapp::algo {
 ChassisControllerOutput user_controller_step(const ChassisControllerInput& in)
 {
   ChassisControllerOutput out{};
-  if (in.operator_state == nullptr || in.lqr == nullptr) return out;
-  if (!in.operator_state->enabled || in.operator_state->e_stop) return out;
+  static float int_err = 0.0f;
+  static uint64_t last_ts_us = 0;
+  if (in.operator_state == nullptr || in.lqr == nullptr)
+  {
+    int_err = 0.0f;
+    last_ts_us = 0;
+    return out;
+  }
+  if (!in.operator_state->enabled || in.operator_state->e_stop)
+  {
+    int_err = 0.0f;
+    last_ts_us = 0;
+    return out;
+  }
 
   const auto& s = *in.lqr;
-  if (!s.valid) return out;
+  if (!s.valid)
+  {
+    int_err = 0.0f;
+    last_ts_us = 0;
+    return out;
+  }
   if (!(kMotorKt_NmPerA > 0.0f)) return out;
 
-  const float x0 = s.theta_rad;
-  const float x1 = s.theta_dot_rps;
-  const float x2 = s.x_m;
-  const float x3 = s.x_dot_mps;
-
-  if (!std::isfinite(x0) || !std::isfinite(x1) || !std::isfinite(x2) || !std::isfinite(x3))
+  if (!std::isfinite(s.theta_rad) || !std::isfinite(s.theta_dot_rps))
   {
     return out;
   }
 
-  // LQR: u = -Kx, u is total wheel torque (N*m).
-  const float u = -(kLqrK[0] * x0 + kLqrK[1] * x1 + kLqrK[2] * x2 + kLqrK[3] * x3);
+  const uint64_t now_us = in.ts_us;
+  float dt_s = 0.0f;
+  if (last_ts_us != 0U && now_us >= last_ts_us)
+  {
+    dt_s = static_cast<float>(now_us - last_ts_us) * 1.0e-6f;
+  }
+  if (!(dt_s > 0.0f) || dt_s > 0.1f)
+  {
+    int_err = 0.0f;
+    dt_s = 0.0f;
+  }
+  last_ts_us = now_us;
+
+  const float err = -s.theta_rad;  // target pitch = 0
+  if (dt_s > 0.0f)
+  {
+    int_err += err * dt_s;
+    const float lim = domain::config::kBalanceIntLimit;
+    if (int_err > lim) int_err = lim;
+    if (int_err < -lim) int_err = -lim;
+  }
+
+  // PID: torque command (N*m).
+  const float u = domain::config::kBalanceKp * err +
+                  domain::config::kBalanceKi * int_err +
+                  domain::config::kBalanceKd * (-s.theta_dot_rps);
 
   // Split total torque equally across two wheels.
   const float torque_per_wheel = 0.5f * u;

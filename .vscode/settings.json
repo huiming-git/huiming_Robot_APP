@@ -27,4 +27,5 @@
         // 注意双反斜杠
         "--query-driver=c:\\Toolchain\\**"
     ],
+    "cortex-debug.variableUseNaturalFormat": false,
 }

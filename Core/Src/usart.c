@@ -39,6 +39,8 @@ static volatile uint16_t sbus_pipe_r = 0;
 volatile uint32_t g_app_sbus_pipe_dropped = 0;
 volatile uint32_t g_app_sbus_rx_events = 0;
 volatile uint32_t g_app_sbus_rx_bytes = 0;
+volatile uint32_t g_app_sbus_uart_errors = 0;
+volatile uint32_t g_app_sbus_uart_last_error = 0;
 
 extern osThreadId_t sbusTaskHandle;
 
@@ -211,12 +213,28 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 
     g_app_sbus_rx_events += 1U;
     g_app_sbus_rx_bytes += (uint32_t)pushed;
+    HAL_GPIO_TogglePin(LED_SBUS_GPIO_Port, LED_SBUS_Pin);
 
     if (sbusTaskHandle != NULL)
     {
       (void)osThreadFlagsSet(sbusTaskHandle, APP_SBUS_RX_FLAG);
     }
   }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance != USART3)
+  {
+    return;
+  }
+
+  g_app_sbus_uart_errors += 1U;
+  g_app_sbus_uart_last_error = huart->ErrorCode;
+  sbus_rx_last_idx = 0;
+
+  (void)HAL_UARTEx_ReceiveToIdle_DMA(&huart3, sbus_rx_buf, SBUS_RX_BUF_LEN);
+  __HAL_DMA_DISABLE_IT(&hdma_usart3_rx, DMA_IT_HT);
 }
 
 uint16_t App_SbusPipe_Read(uint8_t* out, uint16_t max_len)

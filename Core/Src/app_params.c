@@ -173,7 +173,7 @@ static void defaults_v2(AppParamsPayloadV2* out)
   out->wheel_odom_cfg.wheel_radius_m = 0.06f;
   out->wheel_odom_cfg.wheel_track_m = 0.30f;
   out->wheel_odom_cfg.wheel_gear_ratio = 19.2f;
-  out->wheel_odom_cfg.rpm_sign_left = 1;
+  out->wheel_odom_cfg.rpm_sign_left = -1;
   out->wheel_odom_cfg.rpm_sign_right = 1;
 
   // Minimal controller defaults (keep aligned with RobotApp/Domain/config.hpp defaults).

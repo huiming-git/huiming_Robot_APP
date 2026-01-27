@@ -71,6 +71,8 @@ void Error_Handler(void);
 #define INT1_Gyro_EXTI_IRQn EXTI9_5_IRQn
 #define CS1_Gyro_Pin GPIO_PIN_0
 #define CS1_Gyro_GPIO_Port GPIOB
+#define LED_SBUS_Pin GPIO_PIN_13
+#define LED_SBUS_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
 #define APP_CONTROL_TICK_FLAG (1U << 0)

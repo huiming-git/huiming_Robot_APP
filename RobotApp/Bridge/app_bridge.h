@@ -128,6 +128,7 @@ extern App_SafetyConfig g_robotapp_safety_cfg;
 extern App_WheelOdomConfig g_robotapp_wheel_odom_cfg;
 extern App_WheelControllerConfig g_robotapp_wheel_ctrl_cfg;
 extern volatile int16_t g_robotapp_wheel_cmd_mA[2];
+extern volatile float g_robotapp_joint_hold_pos[4];
 extern volatile uint8_t g_app_can2_dbg_enable;
 extern volatile uint16_t g_app_can2_dbg_std_id;
 extern volatile uint16_t g_app_can2_dbg_ids[4];

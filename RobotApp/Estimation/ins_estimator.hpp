@@ -50,6 +50,9 @@ class InsEstimator {
 
   // Integral of attitude error (unitless); used to estimate gyro bias.
   float err_int_[3] = {0.0f, 0.0f, 0.0f};
+
+  bool mount_offset_valid_ = false;
+  float mount_offset_rpy_[3] = {0.0f, 0.0f, 0.0f};
 };
 
 }  // namespace robotapp::estimation
