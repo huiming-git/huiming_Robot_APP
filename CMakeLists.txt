@@ -67,6 +67,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     RobotApp/Tasks/sensor_task.cpp
     RobotApp/Tasks/logic_task.cpp
     RobotApp/Tasks/sbus_task.cpp
+    RobotApp/Tasks/joint_trim_task.cpp
     RobotApp/Inputs/sbus.cpp
     RobotApp/Drivers/bmi088.cpp
     RobotApp/Drivers/bmi088_dma_transport.c

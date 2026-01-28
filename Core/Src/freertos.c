@@ -89,6 +89,13 @@ const osThreadAttr_t canDebugTask_attributes = {
   .priority = (osPriority_t) osPriorityIdle,
 };
 
+osThreadId_t jointTrimTaskHandle;
+const osThreadAttr_t jointTrimTask_attributes = {
+  .name = "jointTrimTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+
 volatile uint8_t g_app_can2_dbg_enable = 1;
 volatile uint16_t g_app_can2_dbg_std_id = 0x04;
 volatile uint16_t g_app_can2_dbg_ids[4] = {1U, 2U, 3U, 4U};
@@ -114,6 +121,7 @@ void StartSensorTask(void *argument);
 void StartSbusTask(void *argument);
 void StartLogicTask(void *argument);
 void StartCanDebugTask(void *argument);
+void StartJointTrimTask(void *argument);
 
 /* USER CODE END FunctionPrototypes */
 
@@ -157,6 +165,7 @@ void MX_FREERTOS_Init(void) {
   sbusTaskHandle = osThreadNew(StartSbusTask, NULL, &sbusTask_attributes);
   logicTaskHandle = osThreadNew(StartLogicTask, NULL, &logicTask_attributes);
   canDebugTaskHandle = osThreadNew(StartCanDebugTask, NULL, &canDebugTask_attributes);
+  jointTrimTaskHandle = osThreadNew(StartJointTrimTask, NULL, &jointTrimTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -178,7 +187,6 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    App_Params_Service();
     osDelay(1);
   }
   /* USER CODE END StartDefaultTask */

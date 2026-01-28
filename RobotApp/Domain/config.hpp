@@ -47,7 +47,7 @@ inline constexpr uint32_t kIstBackoffUs = 500'000U;
 inline constexpr uint32_t kIstFailStreakThreshold = 3U;
 
 // Manual fallback mapping (temporary until full control algorithm is implemented).
-inline constexpr float kWheelCurrentScale_mA = 10000.0f;
+inline constexpr float kWheelCurrentScale_mA = 22000.0f;
 inline constexpr float kRcDeadband = 0.05f;
 
 // Topology (current hard-coded robot setup).
@@ -66,25 +66,39 @@ inline constexpr int8_t kWheelRpmSignRight = 1;   // forward: right wheel CCW (r
 inline constexpr uint32_t kOdomTimeoutUs = 200'000U;
 
 // Minimal closed-loop controller defaults (tune on real robot).
-inline constexpr float kMaxVxMps = 1.5f;          // hl_cmd.vx in [-1,1] -> m/s
-inline constexpr float kMaxWzRps = 3.0f;          // hl_cmd.wz in [-1,1] -> rad/s
-inline constexpr float kWheelVelKp_mA_per_mps = 3000.0f;
-inline constexpr int16_t kWheelCurrentLimit_mA = 15000;
+inline constexpr float kMaxVxMps = 2.0f;          // hl_cmd.vx in [-1,1] -> m/s
+inline constexpr float kMaxWzRps = 4.0f;          // hl_cmd.wz in [-1,1] -> rad/s
+inline constexpr float kWheelVelKp_mA_per_mps = 8000.0f;
+inline constexpr int16_t kWheelCurrentLimit_mA = 30000;
 
 // Balance PID (torque in N*m).
-inline constexpr float kBalanceKp = 35.0f;
+inline constexpr float kBalanceKp = 18.0f;
 inline constexpr float kBalanceKi = 0.0f;
-inline constexpr float kBalanceKd = 1.5f;
+inline constexpr float kBalanceKd = 1.0f;
 inline constexpr float kBalanceIntLimit = 0.3f;
+
+// RC torque mapping (mA): forward/back and turn mixing.
+inline constexpr float kRcDriveCurrent_mA = 8000.0f;
+inline constexpr float kRcTurnCurrent_mA = 6000.0f;
+
+// IMU mount offset capture (seconds).
+inline constexpr float kImuMountOffsetWindowS = 2.0f;
+
+// Pitch-only estimator (fast response, minimal lag).
+inline constexpr bool kPitchOnlyEstimator = true;
+inline constexpr float kPitchFilterAlpha = 0.95f;
+inline constexpr float kPitchOutputAlpha = 0.8f;
+inline constexpr float kPitchKalmanQ = 0.01f;
+inline constexpr float kPitchKalmanR = 0.02f;
 
 // Joint hold/debug settings (DM4310).
 inline constexpr float kJointHoldKp = 32.0f;
 inline constexpr float kJointHoldKd = 1.0f;
 inline constexpr std::array<float, 4> kJointStandPosRad = {
-    -0.651750565f,
-    0.645647049f,
-    0.167277336f,
-    -0.224880219f,
+    -1.22371221f,
+    1.07631862f,
+    -0.572659492f,
+    0.631205797f,
 };
 inline constexpr float kJointTestAmplitudeRad = 0.35f;
 inline constexpr float kJointTestFreqHz = 0.5f;

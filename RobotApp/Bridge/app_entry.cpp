@@ -15,14 +15,33 @@
 #include "RobotApp/Estimation/ins_estimator.hpp"
 #include "RobotApp/Platform/heap_guard.hpp"
 #include "RobotApp/Util/double_buffer.hpp"
+#include "stm32f4xx.h"
 
 extern "C" {
 #include "app_sbus.h"
 #include "app_can.h"
 #include "app_spi.h"
 #include "app_i2c.h"
-#include "app_params.h"
 }
+
+namespace {
+uint32_t g_cycles_per_us = 0;
+
+void init_dwt_counter()
+{
+  if (g_cycles_per_us != 0U) return;
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0U;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+  g_cycles_per_us = SystemCoreClock / 1000000U;
+  if (g_cycles_per_us == 0U) g_cycles_per_us = 1U;
+}
+
+inline uint32_t cycles_to_us(uint32_t cycles)
+{
+  return cycles / g_cycles_per_us;
+}
+}  // namespace
 
 namespace robotapp {
 
@@ -109,35 +128,6 @@ static void maybe_factory_reset_gesture(const domain::RemoteState& st,
   }
 }
 
-static void maybe_update_joint_hold_from_encoder(const domain::RemoteState& st,
-                                                 const domain::OperatorState& op)
-{
-  static uint8_t last_sw = 0;
-  const uint8_t sw = st.sw[domain::remote::kJointHoldUpdateSwitchIdxA];
-  if (st.failsafe || st.frame_lost) {
-    last_sw = sw;
-    return;
-  }
-
-  const bool rising = (sw == domain::remote::kJointHoldUpdateSwitchOn) &&
-                      (last_sw != domain::remote::kJointHoldUpdateSwitchOn);
-  if (rising)
-  {
-    if (!op.enabled)
-    {
-      g_robotapp_joint_hold_pos[0] = g_robotapp_dm_pos[0];
-      g_robotapp_joint_hold_pos[2] = g_robotapp_dm_pos[2];
-    }
-    else
-    {
-      g_robotapp_joint_hold_pos[1] = g_robotapp_dm_pos[1];
-      g_robotapp_joint_hold_pos[3] = g_robotapp_dm_pos[3];
-    }
-  }
-
-  last_sw = sw;
-}
-
 static void set_default_runtime_params(void)
 {
   // Defaults for runtime-tunable safety policy (can be overridden via persisted params or RobotApp_SetSafetyConfig).
@@ -164,91 +154,15 @@ static void set_default_runtime_params(void)
   ::g_robotapp_imu_calib = robotapp::domain::ImuCalibration{};
   ::g_robotapp_mag_calib = robotapp::domain::MagCalibration{};
   ::g_robotapp_wheel_odom_cfg = robotapp::domain::WheelOdomConfig{};
+  ::g_robotapp_wheel_odom_cfg.rpm_sign_left = robotapp::domain::config::kWheelRpmSignLeft;
+  ::g_robotapp_wheel_odom_cfg.rpm_sign_right = robotapp::domain::config::kWheelRpmSignRight;
   ::g_robotapp_wheel_ctrl_cfg = robotapp::domain::WheelControllerConfig{};
+  ::g_robotapp_wheel_ctrl_cfg.max_vx_mps = robotapp::domain::config::kMaxVxMps;
+  ::g_robotapp_wheel_ctrl_cfg.max_wz_rps = robotapp::domain::config::kMaxWzRps;
+  ::g_robotapp_wheel_ctrl_cfg.wheel_vel_kp_mA_per_mps = robotapp::domain::config::kWheelVelKp_mA_per_mps;
+  ::g_robotapp_wheel_ctrl_cfg.wheel_current_limit_mA = robotapp::domain::config::kWheelCurrentLimit_mA;
   robotapp::set_wheel_odom_cfg(::g_robotapp_wheel_odom_cfg);
   robotapp::set_wheel_ctrl_cfg(::g_robotapp_wheel_ctrl_cfg);
-}
-
-static AppParamsSafetyConfig to_core_safety(const domain::SafetyConfig& in)
-{
-  AppParamsSafetyConfig out{};
-  out.stop_on_sbus_pipe_overflow = in.stop_on_sbus_pipe_overflow;
-  out.stop_on_can_rx_overflow = in.stop_on_can_rx_overflow;
-  out.stop_on_can_tx_congestion = in.stop_on_can_tx_congestion;
-  out.stop_on_spi_comm_error = in.stop_on_spi_comm_error;
-  out.stop_on_i2c_comm_error = in.stop_on_i2c_comm_error;
-  out.stop_on_remote_bad_frame_burst = in.stop_on_remote_bad_frame_burst;
-  out.remote_quality_hold_us = in.remote_quality_hold_us;
-  out.comm_error_hold_us = in.comm_error_hold_us;
-  out.can_tx_ok_timeout_us = in.can_tx_ok_timeout_us;
-  out.remote_bad_frame_burst_window_us = in.remote_bad_frame_burst_window_us;
-  out.remote_bad_frame_burst_threshold = in.remote_bad_frame_burst_threshold;
-  return out;
-}
-
-static domain::SafetyConfig from_core_safety(const AppParamsSafetyConfig& in)
-{
-  domain::SafetyConfig out{};
-  out.stop_on_sbus_pipe_overflow = in.stop_on_sbus_pipe_overflow;
-  out.stop_on_can_rx_overflow = in.stop_on_can_rx_overflow;
-  out.stop_on_can_tx_congestion = in.stop_on_can_tx_congestion;
-  out.stop_on_spi_comm_error = in.stop_on_spi_comm_error;
-  out.stop_on_i2c_comm_error = in.stop_on_i2c_comm_error;
-  out.stop_on_remote_bad_frame_burst = in.stop_on_remote_bad_frame_burst;
-  out.remote_quality_hold_us = in.remote_quality_hold_us;
-  out.comm_error_hold_us = in.comm_error_hold_us;
-  out.can_tx_ok_timeout_us = in.can_tx_ok_timeout_us;
-  out.remote_bad_frame_burst_window_us = in.remote_bad_frame_burst_window_us;
-  out.remote_bad_frame_burst_threshold = in.remote_bad_frame_burst_threshold;
-  return out;
-}
-
-static AppParamsImuCalibration to_core_imu_calib(const domain::ImuCalibration& in)
-{
-  AppParamsImuCalibration out{};
-  for (int i = 0; i < 3; ++i)
-  {
-    out.accel_scale[i] = in.accel_scale[i];
-    out.accel_bias[i] = in.accel_bias[i];
-    out.gyro_scale[i] = in.gyro_scale[i];
-    out.gyro_bias[i] = in.gyro_bias[i];
-  }
-  return out;
-}
-
-static domain::ImuCalibration from_core_imu_calib(const AppParamsImuCalibration& in)
-{
-  domain::ImuCalibration out{};
-  for (int i = 0; i < 3; ++i)
-  {
-    out.accel_scale[i] = in.accel_scale[i];
-    out.accel_bias[i] = in.accel_bias[i];
-    out.gyro_scale[i] = in.gyro_scale[i];
-    out.gyro_bias[i] = in.gyro_bias[i];
-  }
-  return out;
-}
-
-static AppParamsMagCalibration to_core_mag_calib(const domain::MagCalibration& in)
-{
-  AppParamsMagCalibration out{};
-  for (int i = 0; i < 3; ++i)
-  {
-    out.scale[i] = in.scale[i];
-    out.bias[i] = in.bias[i];
-  }
-  return out;
-}
-
-static domain::MagCalibration from_core_mag_calib(const AppParamsMagCalibration& in)
-{
-  domain::MagCalibration out{};
-  for (int i = 0; i < 3; ++i)
-  {
-    out.scale[i] = in.scale[i];
-    out.bias[i] = in.bias[i];
-  }
-  return out;
 }
 
 void InstallChassisController(algo::ChassisControllerFn fn) noexcept
@@ -262,48 +176,6 @@ __attribute__((weak))
 algo::ChassisControllerFn ChassisControllerOverride() noexcept
 {
   return nullptr;
-}
-
-static AppParamsWheelOdomConfig to_core_wheel_odom(const domain::WheelOdomConfig& in)
-{
-  AppParamsWheelOdomConfig out{};
-  out.wheel_radius_m = in.wheel_radius_m;
-  out.wheel_track_m = in.wheel_track_m;
-  out.wheel_gear_ratio = in.wheel_gear_ratio;
-  out.rpm_sign_left = in.rpm_sign_left;
-  out.rpm_sign_right = in.rpm_sign_right;
-  return out;
-}
-
-static domain::WheelOdomConfig from_core_wheel_odom(const AppParamsWheelOdomConfig& in)
-{
-  domain::WheelOdomConfig out{};
-  out.wheel_radius_m = in.wheel_radius_m;
-  out.wheel_track_m = in.wheel_track_m;
-  out.wheel_gear_ratio = in.wheel_gear_ratio;
-  out.rpm_sign_left = in.rpm_sign_left;
-  out.rpm_sign_right = in.rpm_sign_right;
-  return out;
-}
-
-static AppParamsWheelControllerConfig to_core_wheel_ctrl(const domain::WheelControllerConfig& in)
-{
-  AppParamsWheelControllerConfig out{};
-  out.max_vx_mps = in.max_vx_mps;
-  out.max_wz_rps = in.max_wz_rps;
-  out.wheel_vel_kp_mA_per_mps = in.wheel_vel_kp_mA_per_mps;
-  out.wheel_current_limit_mA = in.wheel_current_limit_mA;
-  return out;
-}
-
-static domain::WheelControllerConfig from_core_wheel_ctrl(const AppParamsWheelControllerConfig& in)
-{
-  domain::WheelControllerConfig out{};
-  out.max_vx_mps = in.max_vx_mps;
-  out.max_wz_rps = in.max_wz_rps;
-  out.wheel_vel_kp_mA_per_mps = in.wheel_vel_kp_mA_per_mps;
-  out.wheel_current_limit_mA = in.wheel_current_limit_mA;
-  return out;
 }
 
 }  // namespace robotapp
@@ -323,12 +195,24 @@ App_SafetyConfig g_robotapp_safety_cfg = {};
 App_WheelOdomConfig g_robotapp_wheel_odom_cfg = {};
 App_WheelControllerConfig g_robotapp_wheel_ctrl_cfg = {};
 volatile int16_t g_robotapp_wheel_cmd_mA[2] = {0, 0};
+volatile uint32_t g_robotapp_estimator_us = 0;
+volatile uint32_t g_robotapp_estimator_us_max = 0;
+volatile uint32_t g_robotapp_control_us = 0;
+volatile uint32_t g_robotapp_control_us_max = 0;
 volatile float g_robotapp_joint_hold_pos[4] = {
     robotapp::domain::config::kJointStandPosRad[0],
     robotapp::domain::config::kJointStandPosRad[1],
     robotapp::domain::config::kJointStandPosRad[2],
     robotapp::domain::config::kJointStandPosRad[3],
 };
+volatile float g_robotapp_balance_kp = robotapp::domain::config::kBalanceKp;
+volatile float g_robotapp_balance_ki = robotapp::domain::config::kBalanceKi;
+volatile float g_robotapp_balance_kd = robotapp::domain::config::kBalanceKd;
+volatile float g_robotapp_balance_int_limit = robotapp::domain::config::kBalanceIntLimit;
+volatile float g_robotapp_pitch_filter_alpha = robotapp::domain::config::kPitchFilterAlpha;
+volatile float g_robotapp_pitch_output_alpha = robotapp::domain::config::kPitchOutputAlpha;
+volatile float g_robotapp_pitch_kalman_q = robotapp::domain::config::kPitchKalmanQ;
+volatile float g_robotapp_pitch_kalman_r = robotapp::domain::config::kPitchKalmanR;
 }
 
 extern "C" void RobotApp_Init(void)
@@ -338,19 +222,7 @@ extern "C" void RobotApp_Init(void)
 
   robotapp::set_default_runtime_params();
 
-  // Load persisted params (if present) and apply.
-  App_Params_Init();
-  App_Params_SetAutoResetOnFactoryReset(1U);
-  if (App_Params_LoadedFromFlash() != 0U)
-  {
-    AppParamsPayloadV2 persisted{};
-    App_Params_Get(&persisted);
-    g_robotapp_safety_cfg = robotapp::from_core_safety(persisted.safety_cfg);
-    g_robotapp_imu_calib = robotapp::from_core_imu_calib(persisted.imu_calib);
-    g_robotapp_mag_calib = robotapp::from_core_mag_calib(persisted.mag_calib);
-    g_robotapp_wheel_odom_cfg = robotapp::from_core_wheel_odom(persisted.wheel_odom_cfg);
-    g_robotapp_wheel_ctrl_cfg = robotapp::from_core_wheel_ctrl(persisted.wheel_ctrl_cfg);
-  }
+  // Flash parameter persistence disabled: always use runtime defaults.
   robotapp::g_imu.set_calibration(g_robotapp_imu_calib);
   robotapp::g_mag.set_calibration(g_robotapp_mag_calib);
   robotapp::g_estimator.set_wheel_odom_config(g_robotapp_wheel_odom_cfg);
@@ -372,10 +244,17 @@ extern "C" void RobotApp_ControlTick(uint64_t ts_us)
 {
   robotapp::platform::heap_guard_mark_started();
 
+  init_dwt_counter();
+  const uint32_t ctrl_start = DWT->CYCCNT;
   const auto imu_state = robotapp::g_imu.state();
   const auto mag_state = robotapp::g_mag.state();
   const auto motor_fb = robotapp::get_motor_feedback();
+  const uint32_t est_start = DWT->CYCCNT;
   const auto est = robotapp::g_estimator.step(imu_state, &mag_state, &motor_fb, ts_us);
+  const uint32_t est_end = DWT->CYCCNT;
+  const uint32_t est_us = cycles_to_us(est_end - est_start);
+  g_robotapp_estimator_us = est_us;
+  if (est_us > g_robotapp_estimator_us_max) g_robotapp_estimator_us_max = est_us;
   robotapp::set_estimate(est);
 
   robotapp::g_control_loop.tick(ts_us);
@@ -452,21 +331,26 @@ extern "C" void RobotApp_ControlTick(uint64_t ts_us)
   d.sensor_diag.ist_i2c_cplt_fail = robotapp::drivers::ist8310::g_ist_i2c_cplt_fail;
   d.sensor_diag.ist_i2c_backoff_entered = robotapp::drivers::ist8310::g_ist_i2c_backoff_entered;
   d.sensor_diag.ist_i2c_backoff_skipped = robotapp::drivers::ist8310::g_ist_i2c_backoff_skipped;
-  d.params.load_ok = g_app_params_load_ok;
-  d.params.load_fail = g_app_params_load_fail;
-  d.params.save_ok = g_app_params_save_ok;
-  d.params.save_fail = g_app_params_save_fail;
-  d.params.erase_ok = g_app_params_erase_ok;
-  d.params.erase_fail = g_app_params_erase_fail;
-  d.params.region_invalid = g_app_params_region_invalid;
+  d.params.load_ok = 0U;
+  d.params.load_fail = 0U;
+  d.params.save_ok = 0U;
+  d.params.save_fail = 0U;
+  d.params.erase_ok = 0U;
+  d.params.erase_fail = 0U;
+  d.params.region_invalid = 0U;
   d.params.factory_reset_requested = robotapp::g_factory_reset_requested.load(std::memory_order_relaxed);
-  d.params.factory_reset_ok = g_app_params_factory_reset_ok;
-  d.params.factory_reset_fail = g_app_params_factory_reset_fail;
-  d.params.loaded_from_flash = App_Params_LoadedFromFlash() != 0U ? 1U : 0U;
+  d.params.factory_reset_ok = 0U;
+  d.params.factory_reset_fail = 0U;
+  d.params.loaded_from_flash = 0U;
   d.health = h;
   d.control = robotapp::g_control_loop.telemetry();
   robotapp::set_diag(d);
   g_robotapp_diag = d;  // debug mirror only
+
+  const uint32_t ctrl_end = DWT->CYCCNT;
+  const uint32_t ctrl_us = cycles_to_us(ctrl_end - ctrl_start);
+  g_robotapp_control_us = ctrl_us;
+  if (ctrl_us > g_robotapp_control_us_max) g_robotapp_control_us_max = ctrl_us;
 }
 
 extern "C" void RobotApp_UpdateMotorFeedback(const App_MotorFeedback* fb)
@@ -502,9 +386,6 @@ extern "C" void RobotApp_SetImuCalibration(const App_ImuCalibration* calib)
   {
     robotapp::g_imu.set_calibration(*calib);
     g_robotapp_imu_calib = *calib;  // debug mirror only
-    const auto core = robotapp::to_core_imu_calib(*calib);
-    App_Params_UpdateImuCalib(&core);
-    if (!robotapp::g_params_suppress_save.load(std::memory_order_relaxed)) App_Params_RequestSave();
   }
 }
 
@@ -514,9 +395,6 @@ extern "C" void RobotApp_SetMagCalibration(const App_MagCalibration* calib)
   {
     robotapp::g_mag.set_calibration(*calib);
     g_robotapp_mag_calib = *calib;  // debug mirror only
-    const auto core = robotapp::to_core_mag_calib(*calib);
-    App_Params_UpdateMagCalib(&core);
-    if (!robotapp::g_params_suppress_save.load(std::memory_order_relaxed)) App_Params_RequestSave();
   }
 }
 
@@ -525,19 +403,15 @@ extern "C" void RobotApp_SetSafetyConfig(const App_SafetyConfig* cfg)
   if (cfg != NULL)
   {
     g_robotapp_safety_cfg = *cfg;  // debug mirror only (also serves as runtime config store)
-    const auto core = robotapp::to_core_safety(*cfg);
-    App_Params_UpdateSafetyCfg(&core);
-    if (!robotapp::g_params_suppress_save.load(std::memory_order_relaxed)) App_Params_RequestSave();
   }
 }
 
-extern "C" void RobotApp_RequestSaveParams(void) { App_Params_RequestSave(); }
-extern "C" uint32_t RobotApp_ParamsLoadedFromFlash(void) { return App_Params_LoadedFromFlash(); }
+extern "C" void RobotApp_RequestSaveParams(void) { }
+extern "C" uint32_t RobotApp_ParamsLoadedFromFlash(void) { return 0U; }
 extern "C" void RobotApp_FactoryResetParams(void)
 {
   robotapp::g_params_suppress_save.store(true, std::memory_order_relaxed);
   robotapp::g_factory_reset_in_progress.store(true, std::memory_order_relaxed);
-  App_Params_RequestFactoryReset();
   robotapp::set_default_runtime_params();
   robotapp::g_imu.set_calibration(g_robotapp_imu_calib);
   robotapp::g_mag.set_calibration(g_robotapp_mag_calib);
@@ -597,7 +471,6 @@ extern "C" void RobotApp_SbusFeedBytes(const uint8_t* data, uint16_t len, uint64
       g_robotapp_operator_state = op;  // debug mirror only
 
       robotapp::maybe_factory_reset_gesture(st, op, ts_us);
-      robotapp::maybe_update_joint_hold_from_encoder(st, op);
 
       auto diag = robotapp::g_remote.diagnostics();
       diag.sbus_pipe_dropped = static_cast<uint32_t>(g_app_sbus_pipe_dropped);
@@ -638,9 +511,6 @@ extern "C" void RobotApp_SetWheelOdomConfig(const App_WheelOdomConfig* cfg)
   g_robotapp_wheel_odom_cfg = *cfg;  // debug mirror + runtime store
   robotapp::g_estimator.set_wheel_odom_config(g_robotapp_wheel_odom_cfg);
   robotapp::set_wheel_odom_cfg(g_robotapp_wheel_odom_cfg);
-  const auto core = robotapp::to_core_wheel_odom(*cfg);
-  App_Params_UpdateWheelOdomCfg(&core);
-  if (!robotapp::g_params_suppress_save.load(std::memory_order_relaxed)) App_Params_RequestSave();
 }
 
 extern "C" void RobotApp_SetWheelControllerConfig(const App_WheelControllerConfig* cfg)
@@ -649,7 +519,4 @@ extern "C" void RobotApp_SetWheelControllerConfig(const App_WheelControllerConfi
   if (cfg == NULL) return;
   g_robotapp_wheel_ctrl_cfg = *cfg;  // debug mirror + runtime store
   robotapp::set_wheel_ctrl_cfg(g_robotapp_wheel_ctrl_cfg);
-  const auto core = robotapp::to_core_wheel_ctrl(*cfg);
-  App_Params_UpdateWheelCtrlCfg(&core);
-  if (!robotapp::g_params_suppress_save.load(std::memory_order_relaxed)) App_Params_RequestSave();
 }

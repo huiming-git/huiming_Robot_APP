@@ -28,8 +28,8 @@ inline constexpr std::array<AxisConfig, 8> kAxisCfg = {
     AxisConfig{.invert = false, .deadband = 0.05f, .expo = 0.0f},
 };
 
-// Map SBUS channels to 3-position switch states sw[0..4] (0/1/2).
-inline constexpr std::array<uint8_t, 5> kSwitchMap = {4, 5, 6, 7, 8};
+// Map SBUS channels to 3-position switch states sw[0..5] (0/1/2).
+inline constexpr std::array<uint8_t, 6> kSwitchMap = {4, 5, 6, 7, 8, 9};
 inline constexpr uint16_t kSwitchMid = 1000U;
 inline constexpr uint16_t kSwitchHi = 1500U;
 inline constexpr uint32_t kSwitchDebounceUs = 20'000U;
@@ -51,10 +51,12 @@ inline constexpr uint8_t kDebugBypassSafetySwitchOn = 3;  // unreachable (sw onl
 inline constexpr uint8_t kJointHoldSwitchIdx = 3;
 inline constexpr uint8_t kJointHoldSwitchOn = 2;
 
-// Joint hold preset update switch:
-// - 9th channel: update joints 0/1/2/3 (only when enabled)
-inline constexpr uint8_t kJointHoldUpdateSwitchIdxA = 4;
-inline constexpr uint8_t kJointHoldUpdateSwitchOn = 2;
+// Joint trim switches:
+// - 9th channel: enable trim mode
+// - 10th channel: select joints (0/2 vs 1/3)
+inline constexpr uint8_t kJointTrimEnableSwitchIdx = 4;
+inline constexpr uint8_t kJointTrimSelectSwitchIdx = 5;
+inline constexpr uint8_t kJointTrimSwitchOn = 2;
 
 // E-stop latch behavior:
 // - Once E-stop is asserted, it stays latched until reset condition holds.

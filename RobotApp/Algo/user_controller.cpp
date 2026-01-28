@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "app_bridge.h"
 #include "RobotApp/Domain/config.hpp"
 
 namespace {
@@ -73,21 +74,22 @@ ChassisControllerOutput user_controller_step(const ChassisControllerInput& in)
   }
   last_ts_us = now_us;
 
-  const float err = -s.theta_rad;  // target pitch = 0
+  // Inner balance loop: target pitch = 0.
+  const float err = s.theta_rad;
   if (dt_s > 0.0f)
   {
     int_err += err * dt_s;
-    const float lim = domain::config::kBalanceIntLimit;
+    const float lim = g_robotapp_balance_int_limit;
     if (int_err > lim) int_err = lim;
     if (int_err < -lim) int_err = -lim;
   }
 
   // PID: torque command (N*m).
-  const float u = domain::config::kBalanceKp * err +
-                  domain::config::kBalanceKi * int_err +
-                  domain::config::kBalanceKd * (-s.theta_dot_rps);
+  const float u = g_robotapp_balance_kp * err +
+                  g_robotapp_balance_ki * int_err +
+                  g_robotapp_balance_kd * (-s.theta_dot_rps);
 
-  // Split total torque equally across two wheels.
+  // Split total torque equally across two wheels (base balance torque).
   const float torque_per_wheel = 0.5f * u;
   const float current_A = torque_per_wheel / kMotorKt_NmPerA;
   const float current_mA = current_A * 1000.0f;
@@ -95,10 +97,19 @@ ChassisControllerOutput user_controller_step(const ChassisControllerInput& in)
   const int16_t limit = (in.wheel_ctrl_cfg != nullptr)
                             ? in.wheel_ctrl_cfg->wheel_current_limit_mA
                             : domain::config::kWheelCurrentLimit_mA;
-  const int16_t cmd_mA = clamp_current_mA(current_mA, limit);
+  // RC torque mixing (direct current bias).
+  const float vx = (in.hl_cmd != nullptr) ? in.hl_cmd->vx : 0.0f;
+  const float wz = (in.hl_cmd != nullptr) ? in.hl_cmd->wz : 0.0f;
+  const float drive_mA = vx * domain::config::kRcDriveCurrent_mA;
+  const float turn_mA = wz * domain::config::kRcTurnCurrent_mA;
 
-  if (!out.cmd.wheels.empty()) out.cmd.wheels[0].current = cmd_mA;
-  if (out.cmd.wheels.size() > 1) out.cmd.wheels[1].current = cmd_mA;
+  const int16_t left_cmd =
+      clamp_current_mA(current_mA + drive_mA + turn_mA, limit);
+  const int16_t right_cmd =
+      clamp_current_mA(current_mA + drive_mA - turn_mA, limit);
+
+  if (!out.cmd.wheels.empty()) out.cmd.wheels[0].current = left_cmd;
+  if (out.cmd.wheels.size() > 1) out.cmd.wheels[1].current = right_cmd;
   out.cmd_valid = true;
   return out;
 }

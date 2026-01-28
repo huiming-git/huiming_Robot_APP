@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "app_bridge.h"
 #include "RobotApp/Domain/config.hpp"
 
 namespace robotapp::estimation {
@@ -137,7 +138,13 @@ void InsEstimator::reset(uint64_t ts_us)
   gyro_bias_rps_[0] = gyro_bias_rps_[1] = gyro_bias_rps_[2] = 0.0f;
   accel_bias_mps2_[0] = accel_bias_mps2_[1] = accel_bias_mps2_[2] = 0.0f;
   err_int_[0] = err_int_[1] = err_int_[2] = 0.0f;
-  mount_offset_valid_ = false;
+  pitch_initialized_ = false;
+  pitch_rad_ = 0.0f;
+  pitch_out_rad_ = 0.0f;
+  pitch_kf_.reset(0.0f);
+  mount_offset_start_us_ = 0;
+  mount_offset_samples_ = 0;
+  mount_offset_sum_rpy_[0] = mount_offset_sum_rpy_[1] = mount_offset_sum_rpy_[2] = 0.0f;
   mount_offset_rpy_[0] = mount_offset_rpy_[1] = mount_offset_rpy_[2] = 0.0f;
 }
 
@@ -175,6 +182,80 @@ domain::StateEstimate InsEstimator::step(const domain::ImuState& imu, const doma
   {
     out.ts_us = ts_us;
     out.valid = 0U;
+    return out;
+  }
+
+  if (robotapp::domain::config::kPitchOnlyEstimator)
+  {
+    const float ax = imu.accel_mps2[0] - accel_bias_mps2_[0];
+    const float ay = imu.accel_mps2[1] - accel_bias_mps2_[1];
+    const float az = imu.accel_mps2[2] - accel_bias_mps2_[2];
+    const float pitch_acc = std::atan2(-ax, std::sqrt(ay * ay + az * az));
+
+    const float gyro_y = imu.gyro_dps[1] * kDegToRad;
+    if (!pitch_initialized_)
+    {
+      pitch_rad_ = pitch_acc;
+      pitch_out_rad_ = pitch_rad_;
+      pitch_initialized_ = true;
+    }
+    pitch_rad_ += gyro_y * dt_s;
+    float alpha = g_robotapp_pitch_filter_alpha;
+    if (!std::isfinite(alpha)) alpha = robotapp::domain::config::kPitchFilterAlpha;
+    if (alpha < 0.0f) alpha = 0.0f;
+    if (alpha > 1.0f) alpha = 1.0f;
+    pitch_rad_ = alpha * pitch_rad_ + (1.0f - alpha) * pitch_acc;
+
+    // Optional smoothing/Kalman is kept for later tuning, but current output uses pitch_rad_.
+    float out_alpha = g_robotapp_pitch_output_alpha;
+    if (!std::isfinite(out_alpha)) out_alpha = robotapp::domain::config::kPitchOutputAlpha;
+    if (out_alpha < 0.0f) out_alpha = 0.0f;
+    if (out_alpha > 1.0f) out_alpha = 1.0f;
+    pitch_out_rad_ = out_alpha * pitch_out_rad_ + (1.0f - out_alpha) * pitch_rad_;
+
+    float kq = g_robotapp_pitch_kalman_q;
+    float kr = g_robotapp_pitch_kalman_r;
+    if (!std::isfinite(kq)) kq = robotapp::domain::config::kPitchKalmanQ;
+    if (!std::isfinite(kr)) kr = robotapp::domain::config::kPitchKalmanR;
+    if (kq < 0.0f) kq = 0.0f;
+    if (kr < 0.0f) kr = 0.0f;
+    pitch_kf_.set_tunings(kq, kr);
+    (void)pitch_kf_.update(pitch_out_rad_, dt_s);
+
+    out.q_wxyz[0] = std::cos(pitch_rad_ * 0.5f);
+    out.q_wxyz[1] = 0.0f;
+    out.q_wxyz[2] = std::sin(pitch_rad_ * 0.5f);
+    out.q_wxyz[3] = 0.0f;
+    out.rpy_rad[0] = 0.0f;
+    out.rpy_rad[1] = pitch_rad_;
+    out.rpy_rad[2] = 0.0f;
+
+    if (mount_offset_start_us_ == 0U)
+    {
+      mount_offset_start_us_ = ts_us;
+      mount_offset_samples_ = 0;
+      mount_offset_sum_rpy_[0] = mount_offset_sum_rpy_[1] = mount_offset_sum_rpy_[2] = 0.0f;
+    }
+    if (mount_offset_samples_ == 0U ||
+        (ts_us - mount_offset_start_us_ <= static_cast<uint64_t>(
+            robotapp::domain::config::kImuMountOffsetWindowS * 1.0e6f)))
+    {
+      mount_offset_sum_rpy_[1] += pitch_rad_;
+      mount_offset_samples_ += 1U;
+    }
+    if (mount_offset_samples_ != 0U)
+    {
+      mount_offset_rpy_[1] =
+          mount_offset_sum_rpy_[1] / static_cast<float>(mount_offset_samples_);
+    }
+    out.rpy_rad[1] = pitch_rad_ - mount_offset_rpy_[1];
+
+    out.pos_m[0] = out.pos_m[1] = out.pos_m[2] = 0.0f;
+    out.vel_mps[0] = out.vel_mps[1] = out.vel_mps[2] = 0.0f;
+    out.gyro_bias_rps[0] = out.gyro_bias_rps[1] = out.gyro_bias_rps[2] = 0.0f;
+    out.accel_bias_mps2[0] = out.accel_bias_mps2[1] = out.accel_bias_mps2[2] = 0.0f;
+    out.ts_us = ts_us;
+    out.valid = 1U;
     return out;
   }
 
@@ -279,12 +360,27 @@ domain::StateEstimate InsEstimator::step(const domain::ImuState& imu, const doma
   out.q_wxyz[2] = q_wxyz_[2];
   out.q_wxyz[3] = q_wxyz_[3];
   quat_to_rpy(q_wxyz_, out.rpy_rad);
-  if (!mount_offset_valid_)
+  if (mount_offset_start_us_ == 0U)
   {
-    mount_offset_rpy_[0] = out.rpy_rad[0];
-    mount_offset_rpy_[1] = out.rpy_rad[1];
-    mount_offset_rpy_[2] = out.rpy_rad[2];
-    mount_offset_valid_ = true;
+    mount_offset_start_us_ = ts_us;
+    mount_offset_samples_ = 0;
+    mount_offset_sum_rpy_[0] = mount_offset_sum_rpy_[1] = mount_offset_sum_rpy_[2] = 0.0f;
+  }
+  if (mount_offset_samples_ == 0U ||
+      (ts_us - mount_offset_start_us_ <= static_cast<uint64_t>(
+          robotapp::domain::config::kImuMountOffsetWindowS * 1.0e6f)))
+  {
+    mount_offset_sum_rpy_[0] += out.rpy_rad[0];
+    mount_offset_sum_rpy_[1] += out.rpy_rad[1];
+    mount_offset_sum_rpy_[2] += out.rpy_rad[2];
+    mount_offset_samples_ += 1U;
+    if ((ts_us - mount_offset_start_us_) >
+        static_cast<uint64_t>(robotapp::domain::config::kImuMountOffsetWindowS * 1.0e6f))
+    {
+      mount_offset_rpy_[0] = mount_offset_sum_rpy_[0] / static_cast<float>(mount_offset_samples_);
+      mount_offset_rpy_[1] = mount_offset_sum_rpy_[1] / static_cast<float>(mount_offset_samples_);
+      mount_offset_rpy_[2] = mount_offset_sum_rpy_[2] / static_cast<float>(mount_offset_samples_);
+    }
   }
   out.rpy_rad[0] -= mount_offset_rpy_[0];
   out.rpy_rad[1] -= mount_offset_rpy_[1];

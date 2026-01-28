@@ -49,7 +49,9 @@ inline LogicOutput logic_step(const LogicInput& in)
   // - ch0 (SBUS ch1): clockwise rotation
   // - ch1 (SBUS ch2): forward/back
   float vx = in.remote.ch[1];
-  float wz = -in.remote.ch[0];
+  float wz = -in.remote.ch[0] * 2.0f;  // boost turn torque
+  if (wz > 1.0f) wz = 1.0f;
+  if (wz < -1.0f) wz = -1.0f;
   if (vx > 1.0f) vx = 1.0f;
   if (vx < -1.0f) vx = -1.0f;
   if (wz > 1.0f) wz = 1.0f;

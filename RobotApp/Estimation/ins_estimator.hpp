@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "RobotApp/Domain/types.hpp"
+#include "RobotApp/Estimation/kalman_1d.hpp"
 
 namespace robotapp::estimation {
 
@@ -51,7 +52,14 @@ class InsEstimator {
   // Integral of attitude error (unitless); used to estimate gyro bias.
   float err_int_[3] = {0.0f, 0.0f, 0.0f};
 
-  bool mount_offset_valid_ = false;
+  bool pitch_initialized_ = false;
+  float pitch_rad_ = 0.0f;
+  float pitch_out_rad_ = 0.0f;
+  Kalman1D pitch_kf_{};
+
+  uint64_t mount_offset_start_us_ = 0;
+  uint32_t mount_offset_samples_ = 0;
+  float mount_offset_sum_rpy_[3] = {0.0f, 0.0f, 0.0f};
   float mount_offset_rpy_[3] = {0.0f, 0.0f, 0.0f};
 };
 

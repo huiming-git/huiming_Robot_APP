@@ -611,7 +611,7 @@ void ControlLoop::tick(uint64_t ts_us)
     const bool in_soft_start =
         (joint_hold_start_us_ != 0U) && (ts_us - joint_hold_start_us_ < 2'000'000U);
     const float kp =
-        in_soft_start ? (domain::config::kJointHoldKp * 0.5f) : domain::config::kJointHoldKp;
+        in_soft_start ? (domain::config::kJointHoldKp * 0.3f) : domain::config::kJointHoldKp;
     for (std::size_t i = 0; i < cmd.joints.size() && i < sensors_.joints.size(); ++i)
     {
       cmd.joints[i].mode = domain::JointMode::Position;

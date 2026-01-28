@@ -16,7 +16,7 @@ class RemoteAdapter {
   RemoteAdapter() = default;
 
   // In future, raw type could be SBUS/DBUS bytes. For now, just expose setter.
-  void set_raw_channels(const float ch[8], const uint8_t sw[5], bool failsafe, uint64_t ts_us)
+  void set_raw_channels(const float ch[8], const uint8_t sw[6], bool failsafe, uint64_t ts_us)
   {
     diag_.frames += 1U;
     diag_.last_ts_us = ts_us;
@@ -25,7 +25,7 @@ class RemoteAdapter {
     state_.frame_lost = false;
     if (failsafe) diag_.failsafe += 1U;
     for (int i = 0; i < 8; ++i) state_.ch[i] = ch[i];
-    for (int i = 0; i < 5; ++i) state_.sw[i] = sw[i];
+    for (int i = 0; i < 6; ++i) state_.sw[i] = sw[i];
   }
 
   void apply_sbus(const SbusFrame& f, uint64_t ts_us)
@@ -47,7 +47,7 @@ class RemoteAdapter {
     }
 
     // Switches: raw threshold -> debounce -> publish stable.
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 6; ++i)
     {
       const uint8_t idx = domain::remote::kSwitchMap[(std::size_t)i];
       const uint16_t v = (idx < f.ch.size()) ? f.ch[idx] : 0U;
@@ -165,7 +165,7 @@ class RemoteAdapter {
   domain::RemoteState state_{};
   domain::OperatorState operator_{};
   domain::RemoteDiagnostics diag_{};
-  std::array<SwitchDebounce, 5> sw_{};
+  std::array<SwitchDebounce, 6> sw_{};
   bool e_stop_latched_ = false;
   uint64_t e_stop_reset_since_us_ = 0;
 };
